@@ -1,5 +1,17 @@
 # Changelog
 
+## v2 — 2026-10-13
+
+- **Dochód rok po roku:** korekta przychodu w % dla żniw w danym roku kalendarzowym (np. susza −40%). Wchodzi do
+  wszystkich wyników, harmonogramu i wykresów. Parametry → Dochód z kupionej ziemi → Zmienne lata.
+- **Symulacja zmiennych lat:** 500 wariantów z losowym przychodem (±σ, domyślnie 20%). Karta na górze Wrażliwości:
+  udziały spina się / na granicy / nie spina się, braki na raty, rozrzut zysku i zwrotu, wykres pasma dochodu
+  (80% wariantów, mediana, przykładowe lata) na tle rat oraz pasmo gotówki i majątku. Jedna linia w werdykcie.
+- Wykresy: obsługa pasm i cienkich linii.
+- Nowe pola `incomeYearPct: {}` i `incomeVolatilityPct: 20` — neutralne dla starych scenariuszy (symulacja nie zmienia wyniku bazowego).
+- Podgląd lokalny: `.claude/launch.json` z `autoPort`.
+- Check: 53 sprawdzenia.
+
 ## v1 — 2026-10-13
 
 Pierwsza wersja: etapy 1–7 z [SPEC](SPEC-KALKULATOR-KREDYTU-INWESTYCYJNEGO.md) §12 (bez synca).

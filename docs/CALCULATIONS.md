@@ -33,7 +33,7 @@ Kod: [`js/calc.js`](../js/calc.js), sprawdzenie: `node test/calc.check.js`.
 3. Odsetki Actual/365 doliczone do odsetek narosłych.
 4. Jeśli to miesiąc raty: karencja albo spłata (rata równa / malejąca / ostatnia), odsetki narosłe zerowane.
 5. Koszty kredytu: `koszty roczne / 12` co miesiąc, dopóki trwa kredyt.
-6. Dochód: w miesiącu żniw `dochód z ha × ha × (1 + wzrost)^k × mnożnik stresu`, `k` = numer żniw od 0.
+6. Dochód: w miesiącu żniw `(przychód z ha × korekta roku + część stała z ha) × ha × (1 + wzrost)^k × mnożnik stresu`, `k` = numer żniw od 0.
 7. Przepływ = dochód − rata − koszty kredytu; skumulowana gotówka; wartość ziemi `cena × (1 + wzrost ceny)^(m/12)`.
 8. Majątek = ziemia − saldo − odsetki narosłe + skumulowana gotówka (też w wariancie bez wzrostu ceny ziemi).
 
@@ -41,6 +41,10 @@ Kod: [`js/calc.js`](../js/calc.js), sprawdzenie: `node test/calc.check.js`.
 
 - tryb „z plonu”: `plon × cena − koszty bezpośrednie + dopłaty − podatek rolny`,
 - tryb „kwotą”: wpisany dochód netto.
+
+Część zmienna (przychód) = `plon × cena` w trybie „z plonu”, cały dochód netto w trybie „kwotą”; część stała = reszta
+(`− koszty + dopłaty − podatek rolny`). **Korekta roku** `incomeYearPct['RRRR']` (w %) mnoży część zmienną żniw
+w danym roku kalendarzowym: `max(0, 1 + korekta/100)`. Susza −50% obniża przychód o połowę, a koszty zostają.
 
 ## Wskaźniki (`summarize`)
 
@@ -71,6 +75,18 @@ Kod: [`js/calc.js`](../js/calc.js), sprawdzenie: `node test/calc.check.js`.
 
 Każdy scenariusz to osobne wywołanie `simulate` (czysta funkcja). Szablon zakładał jedną wspólną pętlę; osobne przebiegi są prostsze i przy ~20 ms na całe `calculate` wystarczają.
 
+## Symulacja zmiennych lat (`monteCarlo`)
+
+- 500 wariantów, stałe ziarno (PRNG mulberry32), więc wynik jest deterministyczny.
+- W każdym wariancie i każdym roku: część zmienna dochodu (już z korektą roku) × `max(0, 1 + σ·z)`, `z ~ N(0, 1)`
+  (Box–Muller), lata niezależne. `σ = incomeVolatilityPct / 100`; `σ = 0` → brak symulacji (`mc = null`).
+- Harmonogram kredytu nie zależy od dochodu, więc wariant = scenariusz bazowy + różnica dochodu `Δ_k` w żniwach `k`:
+  gotówka i majątek przesuwają się o `Σ Δ` od miesiąca żniw, zysk vs lokata o `Σ Δ_k × (1 + r_m)^(H − m_k)`.
+  Check porównuje tę metodę z pełną symulacją.
+- Wyniki: udział wariantów ok / na granicy / nie spina się (min. pokrycie jak w werdykcie), udział z co najmniej
+  jednym rokiem bez pokrycia, brak na raty, zysk vs lokata, zwroty — jako 10., 50. i 90. percentyl (interpolacja liniowa);
+  percentyle dochodu w każdym roku oraz gotówki i majątku na koniec każdego roku; 5 przykładowych ścieżek dochodu.
+
 ## Progi (`thresholds`) i siatka (`grid`)
 
 Kryterium: min. pokrycie = bufor. Bisekcja (`solve`) na całym silniku, do tolerancji:
@@ -88,7 +104,8 @@ Siatka: min. pokrycie dla przesunięć stopy −1…+4 pp × zmian dochodu −30
 ## Znane uproszczenia (2026-10-13)
 
 - Dochód netto wpływa w całości raz w roku; nie modelujemy kosztów ponoszonych w trakcie sezonu ani kredytu obrotowego.
-- Stres dochodu obniża dochód netto (nie przychód).
+- Stres dochodu obniża dochód netto (nie przychód); korekty lat i zmienność w symulacji dotyczą przychodu.
+- W symulacji lata są od siebie niezależne (brak serii złych lat), rozkład normalny ucięty na zerze przychodu; raty bez losowania stóp.
 - Gotówka (nadwyżki i braki) nie jest oprocentowana w bilansie; uwzględniają ją NPV i „Zysk vs lokata”.
 - Jedna efektywna stopa alternatywna z Belką naliczaną rocznie.
 - Prowizja liczona od kwoty kredytu bez prowizji.
@@ -105,4 +122,5 @@ Siatka: min. pokrycie dla przesunięć stopy −1…+4 pp × zmian dochodu −30
 | `simulate` | pętla miesięczna → `rows`, `years` |
 | `summarize` | wskaźniki scenariusza |
 | `thresholds`, `grid` | progi i siatka wrażliwości |
+| `monteCarlo` | symulacja zmiennych lat |
 | `calculate` | wszystko naraz dla UI |

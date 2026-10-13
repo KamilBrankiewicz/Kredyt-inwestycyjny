@@ -42,6 +42,8 @@ const Storage = (() => {
     incomeMonth: 8,
     incomeGrowthPct: 0,
     rentPerHa: 1500,
+    incomeYearPct: {},         // { 'RRRR': korekta przychodu w % } dla żniw w danym roku kalendarzowym
+    incomeVolatilityPct: 20,   // odchylenie standardowe przychodu w symulacji zmiennych lat
     // Ocena
     horizonYears: 0,           // 0 = okres kredytu
     landGrowthPct: 0,
@@ -81,7 +83,7 @@ const Storage = (() => {
 
   function withDefaults(inputs) {
     const src = inputs && typeof inputs === 'object' ? inputs : {};
-    return { ...DEFAULTS, ...src, rateOverrides: { ...(src.rateOverrides || {}) } };
+    return { ...DEFAULTS, ...src, rateOverrides: { ...(src.rateOverrides || {}) }, incomeYearPct: { ...(src.incomeYearPct || {}) } };
   }
 
   // ---- szkic formularza ----

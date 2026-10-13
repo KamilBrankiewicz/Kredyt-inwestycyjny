@@ -158,6 +158,17 @@ const UI = (() => {
             { k: 'rentPerHa', label: 'Czynsz dzierżawny w okolicy (dla porównania)', unit: 'zł/ha', min: 0 },
           ],
         },
+        {
+          adv: 'Zmienne lata: symulacja i dochód rok po roku', fields: [
+            {
+              k: 'incomeVolatilityPct', label: 'Zmienność przychodu z roku na rok', unit: '±%', min: 0, max: () => 100, dec: 1,
+              hint: (i) => (+i.incomeVolatilityPct > 0
+                ? `Odchylenie standardowe ${detailed(i) ? 'plonu × ceny' : 'dochodu'}. Mniej więcej co szósty rok wypada o ponad ${num(+i.incomeVolatilityPct, 0)}% gorzej od założeń. 0 = bez symulacji.`
+                : 'Symulacja wyłączona.'),
+            },
+            { custom: 'yearIncome' },
+          ],
+        },
       ],
     },
     {
@@ -241,10 +252,29 @@ const UI = (() => {
       '<button type="button" class="btn btn-small" data-action="ov-add">+ Dodaj zmianę stopy</button></div>';
   }
 
+  // Korekty przychodu dla kolejnych żniw (rok kalendarzowy). Lista zależy od zakupu, okresu, horyzontu i miesiąca żniw.
+  function yearIncomeSig() {
+    return Calc.simulate(inputs, todayIso()).harvests.map((h) => h.year).join(',');
+  }
+  function renderYearIncome() {
+    const sig = yearIncomeSig();
+    const years = sig ? sig.split(',') : [];
+    return `<div class="field" id="year-income" data-sig="${sig}"><label>Korekta przychodu w danym roku, np. −40 przy suszy, +15 w dobrym roku (puste = bez zmian)</label>` +
+      '<div class="year-grid">' + years.map((y, n) => {
+        const v = inputs.incomeYearPct[y];
+        return `<label class="year-cell"><span>${y} <small class="muted">rok ${n + 1}</small></span>` +
+          `<span class="input-wrap"><input type="text" inputmode="decimal" data-year="${y}" value="${v ? escapeHtml(inputFmt(1).format(v)) : ''}" placeholder="0"><span class="unit">%</span></span></label>`;
+      }).join('') + '</div><div class="error" id="year-income-error"></div></div>';
+  }
+  function refreshYearIncome() {
+    const el = $('year-income');
+    if (el && el.dataset.sig !== yearIncomeSig()) el.outerHTML = renderYearIncome();
+  }
+
   function renderForm() {
     const html = SECTIONS.map((s) => `<div class="section"><h2>${escapeHtml(s.title)}</h2>` +
       s.fields.map((f) => (f.adv
-        ? `<details class="adv"><summary>${escapeHtml(f.adv)}</summary>${f.fields.map((g) => (g.custom === 'overrides' ? renderOverrides() : renderField(g))).join('')}</details>`
+        ? `<details class="adv"><summary>${escapeHtml(f.adv)}</summary>${f.fields.map((g) => (g.custom === 'overrides' ? renderOverrides() : g.custom === 'yearIncome' ? renderYearIncome() : renderField(g))).join('')}</details>`
         : renderField(f))).join('') + '</div>').join('');
     // Zachowaj otwarte sekcje „Zaawansowane” przy ponownym renderze.
     const open = [...document.querySelectorAll('#params-form details.adv')].map((d) => d.open);
@@ -297,6 +327,17 @@ const UI = (() => {
     });
     if (ovError) errs.overrides = ovError; else cand.rateOverrides = overrides;
 
+    // Korekty roczne: lata spoza listy zostają (np. po skróceniu horyzontu).
+    const yearPct = { ...inputs.incomeYearPct };
+    let yearError = '';
+    document.querySelectorAll('#year-income [data-year]').forEach((el) => {
+      const v = parsePlnNumber(el.value);
+      if (v === null || v === 0) delete yearPct[el.dataset.year];
+      else if (Number.isNaN(v) || v < -100 || v > 300) yearError = 'Korekta roku: liczba od −100 do 300%.';
+      else yearPct[el.dataset.year] = v;
+    });
+    if (yearError) errs.yearIncome = yearError; else cand.incomeYearPct = yearPct;
+
     inputs = { ...inputs, ...cand };
     errors = errs;
   }
@@ -316,6 +357,8 @@ const UI = (() => {
     });
     const ovErr = $('overrides-error');
     if (ovErr) ovErr.textContent = errors.overrides || '';
+    const yearErr = $('year-income-error');
+    if (yearErr) yearErr.textContent = errors.yearIncome || '';
   }
 
   const hasErrors = () => Object.keys(errors).length > 0;
@@ -335,6 +378,7 @@ const UI = (() => {
   function handleParamInput(e) {
     if (e.target.matches('details, summary')) return;
     readForm();
+    if (!e.target.dataset.year) refreshYearIncome();
     updateFormState();
     recalc(false);
   }
@@ -441,6 +485,7 @@ const UI = (() => {
       `<div class="verdict-status">${badge(s.status)}${st.label}</div>` +
       `<p class="verdict-cause">${verdictCause(s)}</p>` +
       `<p class="verdict-profit ${s.delta >= 0 ? 'pos' : 'neg'}">Na tle lokaty ${pct(inputs.alternativeRate, 2)} (po podatku ${pct(s.altNetRate * 100, 2)}): ${signedZl(s.delta)} ${afterYears(H)}</p>` +
+      (result.mc ? `<p class="small muted">W ${result.mc.runs} symulacjach zmiennych lat (przychód ±${num(result.mc.sd * 100, 0)}%): spina się ${share(result.mc.share.ok)}, na granicy ${share(result.mc.share.warn)}, nie spina się ${share(result.mc.share.bad)} wariantów.</p>` : '') +
       result.warnings.map((w) => `<p class="warn small">${escapeHtml(w)}</p>`).join('') +
       `<button type="button" class="next-step" data-goto="${step.goto || ''}" data-action="${step.action || ''}">${escapeHtml(step.text)}</button>` +
       '</div>';
@@ -528,12 +573,13 @@ const UI = (() => {
     return { lo, hi, ticks };
   }
 
-  function chartSvg({ n, bars = [], lines = [], markers = [], xLabel }) {
+  function chartSvg({ n, bars = [], bands = [], lines = [], markers = [], xLabel }) {
     const W = 360, H = 190, L = 46, R = 8, T = 10, B = 22;
     const pw = W - L - R, ph = H - T - B;
     const vals = [0];
     for (let i = 0; i < n; i++) vals.push(bars.reduce((s, b) => s + Math.max(0, b.values[i] || 0), 0));
     lines.forEach((l) => l.values.forEach((v) => fin(v) && vals.push(v)));
+    bands.forEach((b) => [...b.lo, ...b.hi].forEach((v) => fin(v) && vals.push(v)));
     const { lo, hi, ticks } = niceScale(Math.min(...vals), Math.max(...vals));
     const x = (i) => L + (i + 0.5) * pw / n;
     const y = (v) => T + (hi - v) / (hi - lo) * ph;
@@ -552,9 +598,14 @@ const UI = (() => {
         acc += v;
       });
     }
+    bands.forEach((b) => {
+      const pts = b.lo.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1))
+        .concat(b.hi.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).reverse());
+      s += `<polygon class="band ${b.cls}" points="${pts.join(' ')}"/>`;
+    });
     lines.forEach((l) => {
       const pts = l.values.map((v, i) => (fin(v) ? x(i).toFixed(1) + ',' + y(v).toFixed(1) : null)).filter(Boolean);
-      s += `<polyline class="line ${l.cls}${l.dashed ? ' dashed' : ''}" points="${pts.join(' ')}"/>`;
+      s += `<polyline class="line ${l.cls}${l.dashed ? ' dashed' : ''}${l.thin ? ' thin' : ''}" points="${pts.join(' ')}"/>`;
       if (l.dots) l.values.forEach((v, i) => { if (fin(v)) s += `<circle class="${l.cls}" cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="2.6"/>`; });
     });
     markers.forEach((m, k) => {
@@ -608,6 +659,64 @@ const UI = (() => {
     return chartSvg({ n: rows.length, lines, markers, xLabel: (i) => (i % step === 0 ? String(i / 12) : null) }) +
       legend([['s-info', 'gotówka: wpływy − wydatki'], ['s-accent', 'majątek: ziemia − dług + gotówka']].concat(inputs.landGrowthPct !== 0 ? [['s-accent', 'majątek bez wzrostu ceny ziemi', 'dash']] : [])) +
       '<p class="muted small">Oś pozioma: lata od zakupu. Gotówka zaczyna się od minus wkładu i kosztów zakupu.</p>';
+  }
+
+  function mcIncomeChart(mc) {
+    const ys = mc.years.slice(0, result.base.H / 12);
+    const target = result.base.summary.target;
+    const step = yearStep(ys.length);
+    return chartSvg({
+      n: ys.length,
+      bands: [{ cls: 's-accent', lo: ys.map((y) => y.income.p10), hi: ys.map((y) => y.income.p90) }],
+      lines: [
+        ...mc.samples.map((sample) => ({ cls: 's-muted', thin: true, values: sample.slice(0, ys.length) })),
+        { cls: 's-accent', values: ys.map((y) => y.income.p50) },
+        { cls: 's-danger', values: ys.map((y) => (y.inLoan ? y.debtService : null)) },
+        { cls: 's-muted', dashed: true, values: ys.map((y) => (y.inLoan ? y.debtService * target : null)) },
+      ],
+      xLabel: (i) => ((i + 1) % step === 0 || i === 0 ? String(i + 1) : null),
+    }) + legend([['s-accent', '80% wariantów', 'bar band-key'], ['s-accent', 'mediana dochodu'], ['s-muted', 'przykładowe lata'], ['s-danger', 'raty + koszty kredytu'], ['s-muted', 'wymagany (z buforem)', 'dash']]) +
+      '<p class="muted small">Oś pozioma: kolejne lata od zakupu. Gdy dochód spada pod czerwoną linię, brakuje na raty.</p>';
+  }
+
+  function mcCashChart(mc) {
+    const pts = mc.cash;
+    const step = yearStep(pts.length - 1);
+    return chartSvg({
+      n: pts.length,
+      bands: [{ cls: 's-info', lo: pts.map((p) => p.p10), hi: pts.map((p) => p.p90) }],
+      lines: [
+        { cls: 's-info', values: pts.map((p) => p.p50) },
+        { cls: 's-accent', values: mc.equity.map((p) => p.p50) },
+        { cls: 's-accent', dashed: true, values: mc.equity.map((p) => p.p10) },
+      ],
+      xLabel: (i) => (i % step === 0 ? String(i) : null),
+    }) + legend([['s-info', 'gotówka: 80% wariantów', 'bar band-key'], ['s-info', 'gotówka: mediana'], ['s-accent', 'majątek: mediana'], ['s-accent', 'majątek: co 10. wariant gorszy', 'dash']]) +
+      '<p class="muted small">Oś pozioma: lata od zakupu. Gotówka = wszystkie wpływy minus wydatki od dnia zakupu.</p>';
+  }
+
+  const share = (x) => pct(x * 100, 0);
+  const yearOfMonth = (m) => (m === 0 ? 'od razu' : Math.ceil(m / 12) + '. rok');
+
+  function mcCard() {
+    const mc = result.mc;
+    if (!mc) {
+      return '<div class="card"><h3>Zmienne lata</h3><p class="muted small">Symulacja wyłączona. Ustaw zmienność przychodu w parametrach → Dochód z kupionej ziemi → Zmienne lata.</p></div>';
+    }
+    const H = result.base.H / 12;
+    const corrections = Object.keys(inputs.incomeYearPct).length;
+    return `<div class="card chart"><h3>Zmienne lata: ${mc.runs} symulacji, przychód ±${num(mc.sd * 100, 0)}%</h3>` +
+      `<p class="muted small">Każdy wariant losuje przychód na każdy rok osobno${corrections ? ' i nakłada Twoje korekty lat' : ''}. Raty są takie same jak w scenariuszu bazowym.</p>` +
+      kv('Spina się', `${badge('ok')} ${share(mc.share.ok)} wariantów`) +
+      kv('Na granicy', `${badge('warn')} ${share(mc.share.warn)}`) +
+      kv('Nie spina się', `${badge('bad')} ${share(mc.share.bad)}`) +
+      kv('Przynajmniej jeden rok bez pokrycia rat', share(mc.deficitShare)) +
+      kv('Brakuje na raty łącznie', `mediana ${zl(mc.shortfall.p50)} · w co 10. wariancie ponad ${zl(mc.shortfall.p90)}`) +
+      kv('Zysk vs lokata ' + afterYears(H), `<span class="${mc.delta.p50 >= 0 ? 'pos' : 'neg'}">${signedZl(mc.delta.p50)}</span> (od ${signedZl(mc.delta.p10)} do ${signedZl(mc.delta.p90)})`) +
+      kv('Gotówka wraca w horyzoncie', share(mc.paybackCashShare) + (mc.paybackCash ? ' · mediana ' + yearOfMonth(mc.paybackCash.p50) : '')) +
+      kv('Zwrot z wartością ziemi', mc.paybackWealth ? `mediana: ${yearOfMonth(mc.paybackWealth.p50)} · w co 10. wariancie: ${yearOfMonth(mc.paybackWealth.p90)} lub później` : 'nie w horyzoncie') +
+      '<p class="muted small">Zakresy „od … do” obejmują 80% wariantów (10. i 90. percentyl).</p>' +
+      `<h3>Dochód rok po roku</h3>${mcIncomeChart(mc)}<h3>Gotówka i majątek</h3>${mcCashChart(mc)}</div>`;
   }
 
   function rateChart() {
@@ -705,6 +814,7 @@ const UI = (() => {
       '</tbody></table></div>';
 
     $('sensitivity').innerHTML =
+      mcCard() +
       `<div class="card"><h3>Stres test</h3>${stressTable}<p class="muted small">Ustawienia stresu: parametry → Ocena → Stres test.</p></div>` +
       thresholdsCard() +
       `<div class="card"><h3>Pokrycie rat: stopa × dochód</h3>` +

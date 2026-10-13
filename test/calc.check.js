@@ -138,6 +138,41 @@ check('stopa alternatywna netto = IRR → NPV i zysk vs alternatywa ≈ 0', () =
   near(s.delta, 0, 2, 'delta');
 });
 
+check('korekta roku: −50% przychodu w roku żniw, koszty bez zmian', () => {
+  const base = Calc.simulate(inputs({}), TODAY);
+  const year = base.harvests[2].year;
+  const sim = Calc.simulate(inputs({ incomeYearPct: { [year]: -50 } }), TODAY);
+  const rev = DEFAULTS.yieldT * DEFAULTS.pricePerT, net = Calc.incomePerHa(DEFAULTS);
+  near(sim.harvests[2].income, (rev * 0.5 + net - rev) * DEFAULTS.areaHa, 1e-6, 'dochód w roku z korektą');
+  near(sim.harvests[1].income, base.harvests[1].income, 1e-9, 'inne lata bez zmian');
+});
+
+check('Monte Carlo: różnice dochodu dają ten sam wynik co pełna symulacja', () => {
+  // Korekta roku przez pełną symulację vs scenariusz bazowy + metoda różnic używana w MC.
+  const inp = inputs({ horizonYears: 20 });
+  const base = Calc.calculate(inp, TODAY).base;
+  const year = base.harvests[4].year;
+  const full = Calc.calculate({ ...inp, incomeYearPct: { [year]: -40 } }, TODAY).base.summary;
+  const diff = full.end.cumCash - base.summary.end.cumCash;
+  near(diff, base.revPerHa * -0.4 * base.harvests[4].scale, 1e-6, 'różnica gotówki');
+  const rm = Math.pow(1 + base.summary.altNetRate, 1 / 12) - 1;
+  near(full.delta, base.summary.delta + diff * Math.pow(1 + rm, base.H - base.harvests[4].m), 1e-4, 'zysk vs lokata');
+});
+
+check('Monte Carlo: σ = 0 → brak symulacji; σ > 0 → udziały sumują się do 1, percentyle uporządkowane', () => {
+  assert.equal(Calc.calculate(inputs({ incomeVolatilityPct: 0 }), TODAY).mc, null);
+  const mc = Calc.calculate(inputs({ incomeVolatilityPct: 25 }), TODAY).mc;
+  near(mc.share.ok + mc.share.warn + mc.share.bad, 1, 1e-9, 'udziały');
+  mc.years.forEach((y) => assert.ok(y.income.p10 <= y.income.p50 && y.income.p50 <= y.income.p90));
+  assert.equal(mc.samples.length, 5);
+});
+
+check('Monte Carlo: mała zmienność → mediana ≈ wynik bazowy', () => {
+  const r = Calc.calculate(inputs({ incomeVolatilityPct: 0.01 }), TODAY);
+  near(r.mc.delta.p50, r.base.summary.delta, 50, 'zysk vs lokata');
+  near(r.mc.years[0].income.p50, r.base.years[0].income, 10, 'dochód roku 1');
+});
+
 check('domyślne parametry: wszystkie liczby skończone', () => {
   const r = Calc.calculate(inputs({}), TODAY);
   for (const [k, v] of Object.entries(r.base.summary)) {

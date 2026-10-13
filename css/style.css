@@ -184,6 +184,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .legend i.s-muted { background: var(--text-muted); color: var(--text-muted); }
 .legend i.dash { background: none !important; border-top: 2px dashed currentColor; height: 0; }
 .chart rect { stroke: none; }
+.chart .band { stroke: none; fill-opacity: 0.2; }
+.chart .line.thin { stroke-width: 1; opacity: 0.45; }
+.legend i.band-key { opacity: 0.35; }
+.year-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px 8px; }
+.year-cell { display: block; margin: 0; }
+.year-cell > span:first-child { display: block; font-size: 0.82rem; color: var(--text); margin-bottom: 2px; }
+.year-cell .input-wrap input { padding: 6px 8px; }
 .card ul { margin: 6px 0 0; padding-left: 20px; }
 .card li { margin: 3px 0; }
 

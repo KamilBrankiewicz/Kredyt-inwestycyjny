@@ -162,6 +162,12 @@ Wynik: jaka część dochodu idzie na raty po zakupie i czy gospodarstwo pokryje
 
 Spadek dochodu o X% w wybranym roku lub latach (susza, niskie ceny). Pokazuje, czy wystarczy rezerwa i jak przesuwa się zwrot.
 
+### F16. Zmienne lata — v2 (zrealizowane)
+
+- **Dochód rok po roku:** korekta przychodu w % dla wybranych lat (susza, nieurodzaj, dobry rok).
+- **Symulacja:** 500 wariantów z losowym przychodem w każdym roku (zmienność ±% jako parametr). Wynik: w ilu procentach
+  wariantów zakup się spina, ile brakuje na raty w złych wariantach, rozrzut zysku i zwrotu, wykres pasma dochodu na tle rat.
+
 ### F15. Zapis i eksport — MVP (zapis), V2 (PDF)
 
 - Zapis i wczytanie analizy (plik lokalny).

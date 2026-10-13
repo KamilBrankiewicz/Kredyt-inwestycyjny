@@ -118,6 +118,11 @@ const Calc = (() => {
     let base = num(inp.baseRate);
 
     const annualIncome = incomePerHa(inp) * num(inp.areaHa) * incomeFactor;
+    // Dochód z ha = część zmienna (przychód: plon × cena, w trybie „kwotą” cały dochód) + część stała.
+    // Korekty roczne i zmienność w symulacji dotyczą części zmiennej.
+    const revPerHa = inp.incomeMode === 'simple' ? num(inp.netIncomePerHa) : num(inp.yieldT) * num(inp.pricePerT);
+    const fixedPerHa = incomePerHa(inp) - revPerHa;
+    const yearPct = inp.incomeYearPct || {};
     const incomeGrowth = num(inp.incomeGrowthPct) / 100;
     const landGrowth = num(inp.landGrowthPct) / 100;
     const incomeMonth = clamp(Math.round(num(inp.incomeMonth, 8)), 1, 12);
@@ -126,7 +131,7 @@ const Calc = (() => {
     let balance = p.loan;
     let accrued = 0;
     let cumCash = -p.outlay;
-    let harvests = 0;
+    const harvests = [];
     const rows = [{
       m: 0, date: isoDate(start, day), rate: null, isPayment: false, inGrace: false,
       payment: 0, interest: 0, capital: 0, balance, accrued: 0, income: 0, loanCosts: 0,
@@ -166,7 +171,13 @@ const Calc = (() => {
       if (m <= N && p.loan > 0) loanCosts = yearlyCosts / 12;
 
       let income = 0;
-      if ((idx % 12) + 1 === incomeMonth) income = annualIncome * Math.pow(1 + incomeGrowth, harvests++);
+      if ((idx % 12) + 1 === incomeMonth) {
+        const year = Math.floor(idx / 12);
+        const yearFactor = Math.max(0, 1 + num(yearPct[year]) / 100);
+        const scale = num(inp.areaHa) * Math.pow(1 + incomeGrowth, harvests.length) * incomeFactor;
+        income = (revPerHa * yearFactor + fixedPerHa) * scale;
+        harvests.push({ m, year, yearFactor, scale, income });
+      }
 
       const cash = income - payment - loanCosts;
       cumCash += cash;
@@ -199,7 +210,7 @@ const Calc = (() => {
       });
     }
 
-    return { rows, years, purchase: p, N, H, M, freq, start, day, annualIncome };
+    return { rows, years, harvests, revPerHa, purchase: p, N, H, M, freq, start, day, annualIncome };
   }
 
   // ---- podsumowanie scenariusza ----
@@ -332,6 +343,112 @@ const Calc = (() => {
     });
   }
 
+  // ---- symulacja zmiennych lat (Monte Carlo) ----
+  // Przychód w każdym roku × max(0, 1 + σ·z), z ~ N(0, 1), niezależnie rok do roku, stałe ziarno.
+  // Harmonogram kredytu nie zależy od dochodu, więc każdy wariant to scenariusz bazowy + różnice dochodu.
+  const MC_RUNS = 500;
+  const MC_SEED = 20261013;
+  const MC_SAMPLES = 5;
+
+  function mulberry32(a) {
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function percentile(sorted, p) {
+    if (!sorted.length) return null;
+    const i = (sorted.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+  }
+  const spread = (arr) => {
+    const s = [...arr].sort((a, b) => a - b);
+    return { p10: percentile(s, 0.1), p50: percentile(s, 0.5), p90: percentile(s, 0.9) };
+  };
+
+  function monteCarlo(inp, base) {
+    const sd = num(inp.incomeVolatilityPct) / 100;
+    if (sd <= 0) return null;
+    const { rows, years, harvests, H, revPerHa } = base;
+    const s = base.summary;
+    const target = s.target;
+    const Hy = H / 12;
+    const rand = mulberry32(MC_SEED);
+    const normal = () => {
+      let u = 0;
+      while (u === 0) u = rand();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand());
+    };
+    const rm = Math.pow(1 + s.altNetRate, 1 / 12) - 1;
+
+    const incomeByYear = years.map(() => []);
+    const cashByYear = Array.from({ length: Hy + 1 }, () => []);
+    const equityByYear = Array.from({ length: Hy + 1 }, () => []);
+    const counts = { ok: 0, warn: 0, bad: 0 };
+    const shortfalls = [], deltas = [], paybackCash = [], paybackWealth = [], samples = [];
+    let withDeficit = 0;
+
+    for (let run = 0; run < MC_RUNS; run++) {
+      const diff = harvests.map((h) => revPerHa * h.yearFactor * (Math.max(0, 1 + sd * normal()) - 1) * h.scale);
+
+      let minDscr = Infinity, shortfall = 0;
+      const incomes = years.map((y, i) => {
+        const income = y.income + diff[i];
+        incomeByYear[i].push(income);
+        if (y.inLoan && y.debtService > 0) {
+          minDscr = Math.min(minDscr, income / y.debtService);
+          shortfall += Math.max(0, y.debtService - income);
+        }
+        return income;
+      });
+      counts[minDscr >= target ? 'ok' : minDscr >= 1 ? 'warn' : 'bad']++;
+      if (shortfall > 0) withDeficit++;
+      shortfalls.push(shortfall);
+      if (run < MC_SAMPLES) samples.push(incomes);
+
+      let cum = 0;
+      cashByYear[0].push(rows[0].cumCash);
+      equityByYear[0].push(rows[0].equity);
+      for (let y = 1; y <= Hy; y++) {
+        cum += diff[y - 1];
+        cashByYear[y].push(rows[12 * y].cumCash + cum);
+        equityByYear[y].push(rows[12 * y].equity + cum);
+      }
+
+      let d = s.delta;
+      harvests.forEach((h, k) => { if (h.m <= H) d += diff[k] * Math.pow(1 + rm, H - h.m); });
+      deltas.push(d);
+
+      let acc = 0, k = 0, pc = null, pw = null;
+      for (let m = 0; m <= H && (pc === null || pw === null); m++) {
+        while (k < harvests.length && harvests[k].m === m) acc += diff[k++];
+        if (pw === null && rows[m].equity + acc >= -1e-6) pw = m;
+        if (pc === null && m > 0 && rows[m].cumCash + acc >= 0) pc = m;
+      }
+      if (pc !== null) paybackCash.push(pc);
+      if (pw !== null) paybackWealth.push(pw);
+    }
+
+    return {
+      runs: MC_RUNS, sd,
+      share: { ok: counts.ok / MC_RUNS, warn: counts.warn / MC_RUNS, bad: counts.bad / MC_RUNS },
+      deficitShare: withDeficit / MC_RUNS,
+      shortfall: spread(shortfalls),
+      delta: spread(deltas),
+      paybackCashShare: paybackCash.length / MC_RUNS,
+      paybackCash: paybackCash.length ? spread(paybackCash) : null,
+      paybackWealthShare: paybackWealth.length / MC_RUNS,
+      paybackWealth: paybackWealth.length ? spread(paybackWealth) : null,
+      years: years.map((y, i) => ({ year: y.year, debtService: y.debtService, inLoan: y.inLoan, income: spread(incomeByYear[i]) })),
+      cash: cashByYear.map(spread),
+      equity: equityByYear.map(spread),
+      samples,
+    };
+  }
+
   function calculate(inputs, today) {
     const base = run(inputs, today);
     const stressRate = run(inputs, today, { ratePp: num(inputs.stressRatePp), rateFrom: inputs.stressRateFrom });
@@ -344,11 +461,12 @@ const Calc = (() => {
       base, stressRate, stressIncome,
       thresholds: thresholds(inputs, today, base.summary.target),
       grid: grid(inputs, today), gridRates: GRID_RATES, gridIncome: GRID_INCOME,
+      mc: monteCarlo(inputs, base),
       warnings,
     };
   }
 
-  return { calculate, simulate, summarize, pmt, interest, npv, irr, solve, annualize, incomePerHa, purchase, monthIndex, monthKey };
+  return { calculate, simulate, summarize, monteCarlo, pmt, interest, npv, irr, solve, annualize, incomePerHa, purchase, monthIndex, monthKey };
 })();
 if (typeof window === 'object') window.Calc = Calc;
 if (typeof module === 'object') module.exports = Calc; // Node: test/calc.check.js
