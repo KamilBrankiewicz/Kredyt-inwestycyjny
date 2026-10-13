@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#12121f">
+  <meta name="description" content="Kalkulator kredytu na zakup ziemi rolnej: rata, wymagany dochód z ha i okres zwrotu.">
+  <title>Kredyt na ziemię</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <script>
+    (function () {
+      try {
+        var theme = JSON.parse(localStorage.getItem('kredyt.theme'));
+        if (theme === 'dark' || theme === 'light') document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { /* brak dostępu do storage — motyw systemowy */ }
+    })();
+  </script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <h1>Kredyt na ziemię</h1>
+      <div class="topbar-actions">
+        <button id="btn-help" class="icon-btn" aria-label="Jak to liczymy?" title="Jak to liczymy?">?</button>
+        <button id="btn-settings" class="icon-btn" aria-label="Ustawienia" title="Ustawienia">⚙</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- Parametry: na telefonie arkusz od dołu, od 900 px lewa kolumna -->
+      <aside id="params" class="params" aria-label="Parametry">
+        <div class="sheet-head">
+          <div id="sheet-verdict" class="sheet-verdict"></div>
+          <button id="btn-params-close" class="btn btn-small">Gotowe</button>
+        </div>
+        <form id="params-form" class="params-form" autocomplete="off" onsubmit="return false"></form>
+      </aside>
+
+      <main class="main">
+        <section id="view-result" class="view active" aria-label="Wynik">
+          <div id="verdict"></div>
+          <button id="summary-bar" class="summary-bar" type="button"></button>
+          <div id="tiles" class="tiles"></div>
+          <div id="result-cards"></div>
+        </section>
+
+        <section id="view-schedule" class="view" aria-label="Harmonogram">
+          <div class="segmented" role="tablist">
+            <button id="sched-years" class="seg active" type="button">Roczny</button>
+            <button id="sched-months" class="seg" type="button">Raty</button>
+          </div>
+          <p id="schedule-note" class="muted small"></p>
+          <div id="schedule-table" class="table-scroll"></div>
+        </section>
+
+        <section id="view-sensitivity" class="view" aria-label="Wrażliwość">
+          <div id="sensitivity"></div>
+        </section>
+
+        <section id="view-scenarios" class="view" aria-label="Scenariusze">
+          <button id="btn-save-scenario-2" class="btn btn-primary btn-block" type="button">Zapisz bieżące parametry</button>
+          <div id="scenario-list"></div>
+          <div id="compare"></div>
+        </section>
+      </main>
+    </div>
+
+    <button id="fab-save" class="fab" type="button" aria-label="Zapisz scenariusz">＋ Zapisz</button>
+
+    <nav class="bottom-nav" aria-label="Widoki">
+      <button class="nav-btn active" data-view="result" type="button"><span class="nav-ico">◎</span>Wynik</button>
+      <button class="nav-btn" data-view="schedule" type="button"><span class="nav-ico">☰</span>Harmonogram</button>
+      <button class="nav-btn" data-view="sensitivity" type="button"><span class="nav-ico">⇅</span>Wrażliwość</button>
+      <button class="nav-btn" data-view="scenarios" type="button"><span class="nav-ico">★</span>Scenariusze</button>
+    </nav>
+  </div>
+
+  <!-- Zapis scenariusza -->
+  <div id="modal-save" class="modal-overlay">
+    <div class="modal" role="dialog" aria-labelledby="save-title">
+      <h2 id="save-title">Zapisz scenariusz</h2>
+      <label class="field-label" for="save-name">Nazwa</label>
+      <input id="save-name" class="text-input" maxlength="80">
+      <label class="field-label" for="save-notes">Notatka</label>
+      <textarea id="save-notes" class="text-input" rows="3" maxlength="500"></textarea>
+      <div class="modal-actions">
+        <button id="btn-save-cancel" class="btn" type="button">Anuluj</button>
+        <button id="btn-save-overwrite" class="btn" type="button" hidden>Nadpisz</button>
+        <button id="btn-save-new" class="btn btn-primary" type="button">Zapisz jako nowy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jak to liczymy? -->
+  <div id="modal-help" class="modal-overlay">
+    <div class="modal modal-wide" role="dialog" aria-labelledby="help-title">
+      <h2 id="help-title">Jak to liczymy?</h2>
+      <div class="help">
+        <h3>Kredyt</h3>
+        <p>Oprocentowanie = stopa referencyjna + marża. Odsetki naliczamy dzień po dniu (Actual/365): <code>saldo × oprocentowanie × dni / 365</code>, od dnia płatności do dnia płatności.</p>
+        <p><b>Raty równe:</b> przy każdej racie wysokość raty liczona jest od nowa z bieżącego salda i liczby pozostałych rat: <code>R = S × r / (1 − (1 + r)<sup>−n</sup>)</code>, gdzie <code>r</code> to oprocentowanie na okres raty. Kapitał = R − odsetki. Przy 0%: <code>R = S / n</code>.</p>
+        <p><b>Raty malejące:</b> kapitał stały <code>S / n</code>, do tego odsetki.</p>
+        <p><b>Karencja:</b> albo płacisz same odsetki, albo odsetki są doliczane do salda. Potem spłata kapitału na pozostałe raty. Ostatnia rata domyka saldo do zera.</p>
+        <p><b>Zmiany stopy</b> obowiązują od wskazanego miesiąca do następnej zmiany. Stres testu dodaje punkty procentowe od wybranego miesiąca.</p>
+        <h3>Dochód i wymagany dochód</h3>
+        <p>Dochód netto z ha = plon × cena − koszty bezpośrednie + dopłaty − podatek rolny. Cały roczny dochód wpływa w miesiącu żniw.</p>
+        <p>Rok analizy liczymy od miesiąca zakupu. <b>Obsługa kredytu w roku</b> = suma rat + roczne koszty kredytu. <b>Pokrycie</b> = dochód w roku / obsługa kredytu w roku. <b>Wymagany dochód</b> = najwyższa roczna obsługa kredytu × bufor bezpieczeństwa. <b>Plon progowy</b> = (wymagany dochód na ha + koszty − dopłaty + podatek rolny) / cena.</p>
+        <p>Werdykt: <b>spina się</b>, gdy w każdym roku pokrycie ≥ bufor; <b>na granicy</b>, gdy pokrycie jest między 1 a buforem; <b>nie spina się</b>, gdy w którymś roku dochód nie wystarcza na raty.</p>
+        <h3>Zwrot i opłacalność</h3>
+        <p>W miesiącu zakupu wykładasz gotówkę: wkład + koszty zakupu (+ prowizja, jeśli nie jest kredytowana). Potem co miesiąc: dochód − rata − koszty kredytu.</p>
+        <p><b>Zwrot gotówkowy</b>: pierwszy miesiąc, w którym suma tych przepływów ≥ 0. <b>Zwrot z wartością ziemi</b>: pierwszy miesiąc, w którym wartość ziemi − dług + suma przepływów ≥ 0. Zawsze pokazujemy też wariant bez wzrostu ceny ziemi.</p>
+        <p><b>NPV</b>: przepływy zdyskontowane stopą alternatywną po podatku Belki (19%), na końcu horyzontu doliczona ziemia minus dług. <b>Zysk vs alternatywa</b> = NPV przeniesione na koniec horyzontu: o tyle więcej masz, niż gdyby każda dołożona złotówka leżała na lokacie/obligacjach. <b>IRR</b>: stopa, przy której NPV = 0. <b>RRSO</b>: IRR przepływów kredytu (wypłata bez prowizji, wszystkie raty i koszty).</p>
+        <p><b>Progi</b> szukamy bisekcją na całym kalkulatorze: cena za ha, oprocentowanie i wkład własny, przy których najgorszy rok ma pokrycie dokładnie równe buforowi.</p>
+        <h3>Sprawdź ratę</h3>
+        <div class="mini-calc">
+          <label>Kwota <input id="mini-amount" class="text-input" inputmode="decimal" value="100 000"></label>
+          <label>Oprocentowanie % <input id="mini-rate" class="text-input" inputmode="decimal" value="6"></label>
+          <label>Liczba rat (mies.) <input id="mini-n" class="text-input" inputmode="numeric" value="120"></label>
+          <p>Rata równa: <b id="mini-result">—</b></p>
+        </div>
+        <p class="muted small">Symulacja edukacyjna, nie stanowi rekomendacji inwestycyjnej ani oferty kredytowej. Wyniki zależą wyłącznie od wpisanych założeń.</p>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-help-close" class="btn btn-primary" type="button">Zamknij</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ustawienia -->
+  <div id="modal-settings" class="modal-overlay">
+    <div class="modal" role="dialog" aria-labelledby="settings-title">
+      <h2 id="settings-title">Ustawienia <span class="version">v1</span></h2>
+      <label class="field-label" for="theme-select">Motyw</label>
+      <select id="theme-select" class="text-input">
+        <option value="auto">Systemowy</option>
+        <option value="dark">Ciemny</option>
+        <option value="light">Jasny</option>
+      </select>
+      <h3>Kopia zapasowa</h3>
+      <p class="muted small">Scenariusze są tylko w tej przeglądarce. Eksport zapisuje je do pliku JSON; import scala plik z tym, co już jest.</p>
+      <div class="row-actions">
+        <button id="btn-export" class="btn" type="button">Eksportuj JSON</button>
+        <label class="btn" for="import-file">Importuj JSON</label>
+        <input id="import-file" type="file" accept="application/json,.json" hidden>
+      </div>
+      <p id="import-message" class="small" role="status"></p>
+      <h3>Dane</h3>
+      <button id="btn-clear" class="btn btn-danger" type="button">Wyczyść dane</button>
+      <div class="modal-actions">
+        <button id="btn-settings-close" class="btn btn-primary" type="button">Zamknij</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Potwierdzenie czyszczenia -->
+  <div id="modal-confirm" class="modal-overlay">
+    <div class="modal" role="alertdialog" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">Wyczyścić dane?</h2>
+      <p>Usuniesz wszystkie zapisane scenariusze i bieżące parametry tego kalkulatora. Innych aplikacji to nie dotyczy. Tego nie da się cofnąć — zrób najpierw eksport.</p>
+      <div class="modal-actions">
+        <button id="btn-confirm-cancel" class="btn" type="button">Anuluj</button>
+        <button id="btn-confirm-ok" class="btn btn-danger" type="button">Wyczyść</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/storage.js"></script>
+  <script src="js/calc.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

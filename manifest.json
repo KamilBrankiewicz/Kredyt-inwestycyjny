@@ -1,0 +1,13 @@
+{
+  "name": "Kredyt na ziemię — kalkulator opłacalności",
+  "short_name": "Kredyt ziemia",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "lang": "pl",
+  "background_color": "#12121f",
+  "theme_color": "#12121f",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "192x192 512x512", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
