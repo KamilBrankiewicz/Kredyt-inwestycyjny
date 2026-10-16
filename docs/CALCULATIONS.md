@@ -85,7 +85,11 @@ w danym roku kalendarzowym: `max(0, 1 + korekta/100)`. Susza −50% obniża przy
 |---|---|
 | Obsługa kredytu w roku | suma rat + koszty kredytu w roku analizy |
 | Pokrycie (DSCR) | (dochód w roku + nadwyżka gospodarstwa) / obsługa kredytu w roku (tylko lata kredytu z obsługą > 0) |
-| Werdykt | `ok`: min. pokrycie ≥ bufor; `warn`: 1 ≤ min. pokrycie < bufor; `bad`: < 1 |
+| Status pokrycia (`status`) | `ok`: min. pokrycie ≥ bufor; `warn`: 1 ≤ min. pokrycie < bufor; `bad`: < 1 |
+| Szczyt gotówki (`peakCash`) | `max(0, −min_m (gotówka skumulowana + F × m/12 − Σ raty i koszty istniejących zobowiązań))` na całej osi `0 … M`: wkład i koszty na start, raty przed pierwszymi żniwami, lata bez pokrycia. Te same źródła co pokrycie |
+| Płynność (`cashStatus`) | tylko gdy `cashAvailable > 0`: zostaje = gotówka − szczyt; `bad` < 0, `warn` < pół najwyższej rocznej obsługi długu, inaczej `ok`; przy 0 — `null` |
+| Ryzyko scenariusza (`risk`) | gorszy z `status` i `cashStatus` |
+| Werdykt (`verdict`) | najgorsze `risk` z bazowego, stresu stopy i stresu dochodu; `scenario` = który go wyznacza (przy remisie wcześniejszy). Ten sam werdykt na liście i w porównaniu scenariuszy (`Calc.verdict`) |
 | Wymagany dochód | z kupionej ziemi: max(0, najwyższa roczna obsługa kredytu × bufor − nadwyżka gospodarstwa); też na ha i na miesiąc |
 | Plon progowy | `(wymagany dochód/ha + koszty − dopłaty + podatek rolny) / cena` (tryb „z plonu”) |
 | Brakuje na raty | suma `obsługa − dochód − nadwyżka gospodarstwa` w latach, gdy ta różnica > 0 |

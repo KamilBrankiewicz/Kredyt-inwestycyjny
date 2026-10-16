@@ -266,6 +266,41 @@ check('nadwyżka gospodarstwa: wchodzi do pokrycia, wymaganego dochodu i braku; 
   near(Calc.summarize(Calc.simulate(inputs({ extraLoans: ex, farmIncome: F, pricePerHa: t }), TODAY), inputs({})).minDscr, DEFAULTS.dscrTarget, 1e-3, 'próg ceny');
 });
 
+check('szczyt gotówki i rezerwa', () => {
+  const r = Calc.calculate(inputs({}), TODAY);
+  const s = r.base.summary;
+  near(s.peakCash, -Math.min(...r.base.rows.map((x) => x.cumCash)), 1e-6, 'szczyt = −min gotówki (bez F i istniejących)');
+  assert.ok(s.peakCash > s.startCash, 'raty przed pierwszymi żniwami podnoszą szczyt ponad start');
+  assert.equal(s.cashStatus, null, 'gotówka 0 → bez sprawdzania');
+  assert.equal(s.risk, s.status);
+  const peak = s.peakCash;
+  assert.equal(Calc.calculate(inputs({ cashAvailable: peak - 1 }), TODAY).base.summary.cashStatus, 'bad');
+  assert.equal(Calc.calculate(inputs({ cashAvailable: peak + 1 }), TODAY).base.summary.cashStatus, 'warn');
+  assert.equal(Calc.calculate(inputs({ cashAvailable: peak + s.maxDebtService }), TODAY).base.summary.cashStatus, 'ok');
+  // Nadwyżka gospodarstwa dopływa co miesiąc, raty istniejących kredytów wypływają.
+  const F = 120000;
+  const sf = Calc.calculate(inputs({ farmIncome: F }), TODAY);
+  let liq = 0;
+  const min = Math.min(...sf.base.rows.map((x) => x.cumCash + (liq += x.m > 0 ? F / 12 - x.extOut : 0)));
+  near(sf.base.summary.peakCash, Math.max(0, -min), 1e-6, 'szczyt z nadwyżką gospodarstwa');
+  const ex = Calc.calculate(inputs({ extraLoans: [{ ...EXTRA_LOAN_DEFAULTS, purpose: 'existing' }] }), TODAY);
+  assert.ok(ex.base.summary.peakCash > s.peakCash, 'istniejące raty zwiększają szczyt');
+});
+
+check('werdykt łączny = najgorszy z bazowego i stresów', () => {
+  const RANK = { ok: 0, warn: 1, bad: 2 };
+  for (const patch of [{}, { farmIncome: 60000 }, { farmIncome: 45000 }, { farmIncome: 1e6 }, { farmIncome: 1e6, cashAvailable: 1000 }]) {
+    const r = Calc.calculate(inputs(patch), TODAY);
+    const risks = [r.base, r.stressRate, r.stressIncome].map((x) => x.summary.risk);
+    assert.equal(RANK[r.verdict.status], Math.max(...risks.map((k) => RANK[k])), JSON.stringify(patch));
+    assert.equal(r.verdict.status, Calc.verdict(inputs(patch), TODAY).status, 'Calc.verdict = calculate');
+  }
+  const r = Calc.calculate(inputs({ farmIncome: 45000 }), TODAY);
+  assert.equal(r.base.summary.status, 'ok');
+  assert.notEqual(r.verdict.status, 'ok', 'bazowy ok, stres nie → werdykt nie ok');
+  assert.notEqual(r.verdict.scenario, 'base');
+});
+
 check('import: extraLoans musi być tablicą obiektów o dobrych typach', () => {
   const sc = (extraLoans) => ({ version: 1, scenarios: [{ id: 'a', updatedAt: '2026-10-16', name: 'x', inputs: { extraLoans } }] });
   assert.ok(validateImport(sc({})));

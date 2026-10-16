@@ -1,5 +1,16 @@
 # Changelog
 
+## v5 — 2026-10-16
+
+- **Werdykt z najgorszego scenariusza:** werdykt na ekranie Wynik, w arkuszu parametrów, na liście i w porównaniu
+  scenariuszy to najgorszy wynik z bazowego, stresu stopy i stresu dochodu. Opis mówi, który scenariusz go wyznacza.
+  Starsze scenariusze mogą dostać ostrzejszy werdykt — to zamierzone.
+- **Szczyt zaangażowania gotówki:** w karcie Zakup i w stres teście — start plus raty do pierwszych żniw i braki
+  w złych latach (z nadwyżką gospodarstwa i ratami istniejących kredytów).
+- **Rezerwa gotówkowa:** nowe pole `cashAvailable: 0` (0/puste = bez sprawdzania). Gdy gotówki nie wystarczy na szczyt
+  w którymkolwiek scenariuszu → „Nie spina się”; gdy zostaje mniej niż pół roku rat → „Na granicy”.
+- Check: 65 sprawdzeń.
+
 ## v4 — 2026-10-16
 
 - **Nadwyżka z obecnego gospodarstwa (F13):** pole w sekcji „Obecne gospodarstwo i inne kredyty”, zł/rok.

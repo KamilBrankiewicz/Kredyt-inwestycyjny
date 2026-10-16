@@ -145,6 +145,10 @@ const UI = (() => {
           k: 'farmIncome', label: 'Nadwyżka z obecnego gospodarstwa na raty', unit: 'zł/rok', min: 0,
           hint: () => 'Dochód gospodarstwa bez kupowanej ziemi, po kosztach i utrzymaniu rodziny. Liczy się tylko do pokrycia rat; zysk i zwrot z zakupu liczymy bez niej.',
         },
+        {
+          k: 'cashAvailable', label: 'Gotówka, którą masz na zakup i rezerwę', unit: 'zł', min: 0, optional: true,
+          hint: () => 'Razem z wkładem własnym. Sprawdzamy, czy wystarczy w najgorszym momencie — też w stres teście. Puste = bez sprawdzania.',
+        },
         { custom: 'extraLoans' },
       ],
     },
@@ -563,10 +567,10 @@ const UI = (() => {
   }
 
   function renderSheetVerdict() {
-    const s = result.base.summary;
+    const s = result.base.summary, v = result.verdict;
     $('sheet-verdict').innerHTML = hasErrors()
       ? '<span class="warn">Popraw zaznaczone pola</span>'
-      : `${badge(s.status)} <b>${STATUS[s.status].label}</b><br><span class="muted">rata ${zl(s.firstInstallment)} · wymagany ${zl(s.requiredIncome)}/rok</span>`;
+      : `${badge(v.status)} <b>${STATUS[v.status].label}</b>${v.scenario !== 'base' ? ' (w stres teście)' : ''}<br><span class="muted">rata ${zl(s.firstInstallment)} · wymagany ${zl(s.requiredIncome)}/rok</span>`;
   }
 
   function renderSummaryBar() {
@@ -592,23 +596,52 @@ const UI = (() => {
       ` ${zl(s.shortfall)} w ${n} ${plural(n, 'roku', 'latach', 'latach')}.`;
   }
 
-  function nextStep(s) {
+  // Nazwy scenariuszy stresu (werdykt, tabela stresu).
+  const stressLabel = (key) => (key === 'stressRate'
+    ? `stopie wyższej o ${pp(inputs.stressRatePp)}${inputs.stressRateFrom ? ' ' + fromMonth(inputs.stressRateFrom) : ''}`
+    : `dochodzie niższym o ${num(inputs.stressIncomePct, 0)}%`);
+
+  function cashCause(s) {
+    const when = s.peakMonth ? ` (${humanMonth(result.base.rows[s.peakMonth].date)})` : '';
+    if (s.cashStatus === 'bad') return `Zabraknie gotówki: w najgorszym momencie${when} trzeba mieć ${zl(s.peakCash)}, a masz ${zl(s.cashAvailable)} — brakuje ${zl(-s.cashLeft)}.`;
+    return `Gotówki wystarczy, ale po najgorszym momencie${when} zostaje tylko ${zl(s.cashLeft)} — mniej niż pół roku rat (${zl(s.maxDebtService / 2)}).`;
+  }
+
+  // Przyczyna werdyktu łącznego: wynik bazowy, potem każdy stres i płynność, które dają ten sam (najgorszy) status.
+  function verdictText(v) {
+    const base = result.base.summary;
+    const parts = [verdictCause(base)];
+    if (v.status === 'ok') return parts[0];
+    ['stressRate', 'stressIncome'].forEach((key) => {
+      const s = result[key].summary;
+      if (s.status === v.status && base.status !== v.status) {
+        parts.push(`Przy ${stressLabel(key)} — ${STATUS[s.status].label.toLowerCase()}: w najgorszym roku pokrycie ${pct(s.minDscr * 100, 0)}` +
+          (s.shortfall > 0 ? `, brakuje ${zl(s.shortfall)}.` : '.'));
+      }
+    });
+    const cashKey = ['base', 'stressRate', 'stressIncome'].find((key) => result[key].summary.cashStatus === v.status);
+    if (cashKey) parts.push((cashKey !== 'base' ? `Przy ${stressLabel(cashKey)}: ` : '') + cashCause(result[cashKey].summary));
+    return parts.join(' ');
+  }
+
+  function nextStep(v, s) {
     const t = result.thresholds;
     if (s.status === 'bad' && t.maxPricePerHa.value !== null) return { text: `Zobacz progi: zakup spina się przy cenie do ${zl(t.maxPricePerHa.value)}/ha`, goto: 'sensitivity' };
     if (s.status === 'bad') return { text: 'Sprawdź w Wrażliwości, co musiałoby się zmienić', goto: 'sensitivity' };
-    if (s.status === 'warn') return { text: `Sprawdź, co się stanie przy wzroście stóp o ${pp(inputs.stressRatePp)}`, goto: 'sensitivity' };
+    if (v.status !== 'ok') return { text: 'Zobacz stres test w Wrażliwości', goto: 'sensitivity' };
     return { text: 'Zapisz ten wariant i porównaj z innym', action: 'save' };
   }
 
   function renderResult() {
-    const r = result.base, s = r.summary;
-    const st = STATUS[s.status];
-    const step = nextStep(s);
+    const r = result.base, s = r.summary, v = result.verdict;
+    const st = STATUS[v.status];
+    const step = nextStep(v, s);
     const H = s.horizonMonths / 12;
     $('verdict').innerHTML = (hasErrors() ? '<p class="stale-note">Popraw zaznaczone pola w parametrach — poniżej ostatni poprawny wynik.</p>' : '') +
-      `<div class="card verdict ${s.status}">` +
-      `<div class="verdict-status">${badge(s.status)}${st.label}</div>` +
-      `<p class="verdict-cause">${verdictCause(s)}</p>` +
+      `<div class="card verdict ${v.status}">` +
+      `<div class="verdict-status">${badge(v.status)}${st.label}</div>` +
+      `<p class="verdict-cause">${verdictText(v)}</p>` +
+      '<p class="small muted">Werdykt = najgorszy wynik z wariantu bazowego i stres testu' + (s.cashAvailable > 0 ? ', razem z rezerwą gotówki' : '') + '.</p>' +
       `<p class="verdict-profit ${s.delta >= 0 ? 'pos' : 'neg'}">Na tle lokaty ${pct(inputs.alternativeRate, 2)} (po podatku ${pct(s.altNetRate * 100, 2)}): ${signedZl(s.delta)} ${afterYears(H)}</p>` +
       (result.mc ? `<p class="small muted">W ${result.mc.runs} symulacjach zmiennych lat (przychód ±${num(result.mc.sd * 100, 0)}%): spina się ${share(result.mc.share.ok)}, na granicy ${share(result.mc.share.warn)}, nie spina się ${share(result.mc.share.bad)} wariantów.</p>` : '') +
       result.warnings.map((w) => `<p class="warn small">${escapeHtml(w)}</p>`).join('') +
@@ -654,7 +687,14 @@ const UI = (() => {
       kv('Notariusz, wycena, inne', zl(p.oneOff - p.pcc)) + kv('Wkład własny', zl(p.own)) +
       kv('Prowizja' + (inputs.feeFinanced ? ' (w kredycie)' : ''), zl(p.fee)) + kv('Kwota kredytu', zl(p.loan)) +
       (r.inflow ? kv('Inne kredyty na zakup (po prowizji)', '−' + zl(r.inflow)) : '') +
-      kv('Gotówka potrzebna na start', zl(s.startCash), true) + '</div>' +
+      kv('Gotówka potrzebna na start', zl(s.startCash)) +
+      kv('Najwięcej gotówki zaangażowanej' + (s.peakMonth ? ` (${humanMonth(r.rows[s.peakMonth].date)})` : ''), zl(s.peakCash), true) +
+      kv(`To samo przy ${stressLabel('stressIncome')}`, zl(result.stressIncome.summary.peakCash)) +
+      (s.cashAvailable > 0
+        ? kv('Zostaje z Twojej gotówki', `<span class="${s.cashLeft >= 0 ? 'pos' : 'neg'}">${signedZl(s.cashLeft)}</span>`) +
+          kv(`… przy ${stressLabel('stressIncome')}`, `<span class="${result.stressIncome.summary.cashLeft >= 0 ? 'pos' : 'neg'}">${signedZl(result.stressIncome.summary.cashLeft)}</span>`)
+        : '') +
+      '<p class="muted small">Szczyt: start plus raty do pierwszych żniw i lata, w których dochód nie pokrywa rat (z nadwyżką gospodarstwa i ratami istniejących kredytów).</p></div>' +
       `<div class="card"><h3>Koszt kredytu${extras ? ' na ziemię' : ''}</h3>` +
       kv('Odsetki łącznie', zl(s.totalInterest)) + kv('Prowizja', zl(p.fee)) + kv('Ubezpieczenie i inne', zl(s.loanCostsTotal)) +
       kv('Całkowity koszt kredytu', zl(s.totalCost), true) + kv('Suma wszystkich rat', zl(s.totalPaid)) + kv('RRSO', s.rrso === null ? '—' : pct(s.rrso * 100, 2)) + '</div>' +
@@ -949,11 +989,13 @@ const UI = (() => {
     ];
     const row = (label, fn) => `<tr><td>${label}</td>${cols.map(([, s, rows]) => `<td>${fn(s, rows)}</td>`).join('')}</tr>`;
     const stressTable = '<div class="table-scroll"><table><thead><tr><th></th>' + cols.map(([l]) => `<th>${escapeHtml(l)}</th>`).join('') + '</tr></thead><tbody>' +
-      row('Werdykt', (s) => `${badge(s.status)} ${STATUS[s.status].label}`) +
+      row('Werdykt', (s) => `${badge(s.risk)} ${STATUS[s.risk].label}`) +
       row('Pierwsza rata', (s) => zl(s.firstInstallment)) +
       row('Najwyższa rata', (s) => zl(s.maxInstallment)) +
       row('Min. pokrycie', (s) => (fin(s.minDscr) ? num(s.minDscr, 2) : '—')) +
       row('Brakuje na raty', (s) => zl(s.shortfall)) +
+      row('Najwięcej gotówki zaangażowanej', (s) => zl(s.peakCash)) +
+      (inputs.cashAvailable > 0 ? row('Zostaje z Twojej gotówki', (s) => `<span class="${s.cashLeft >= 0 ? 'pos' : 'neg'}">${signedZl(s.cashLeft)}</span>`) : '') +
       row('Zysk vs lokata', (s) => `<span class="${s.delta >= 0 ? 'pos' : 'neg'}">${signedZl(s.delta)}</span>`) +
       row('Zwrot gotówkowy', (s) => paybackText(s.paybackCash, s)) +
       row('Zwrot z ziemią', (s) => paybackText(s.paybackWealth, s)) +
@@ -979,7 +1021,8 @@ const UI = (() => {
 
   // ---------------------------------------------------------------- scenariusze
 
-  const quickSummary = (inp) => Calc.summarize(Calc.simulate(inp, todayIso()), inp);
+  // Podsumowanie bazowe ze statusem = werdykt łączny (bazowy + stresy + płynność), jak na ekranie Wynik.
+  const quickSummary = (inp) => { const v = Calc.verdict(inp, todayIso()); return { ...v.base, status: v.status }; };
 
   function renderScenarios() {
     const list = Storage.getScenarios();

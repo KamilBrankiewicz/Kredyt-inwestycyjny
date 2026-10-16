@@ -344,6 +344,19 @@ const Calc = (() => {
 
     const allCost = loans.reduce((s, l) => s + l.totalCost, 0);
 
+    // Płynność: gotówka z zakupu + nadwyżka gospodarstwa (F/12 co miesiąc) − raty istniejących zobowiązań,
+    // czyli te same źródła i wydatki co w pokryciu. Szczyt = największy minus na całej osi analizy.
+    let liq = 0, peakCash = 0, peakMonth = 0;
+    rows.forEach((r) => {
+      if (r.m > 0) liq += farmIncome / 12 - r.extOut;
+      if (-(r.cumCash + liq) > peakCash) { peakCash = -(r.cumCash + liq); peakMonth = r.m; }
+    });
+    // Gotówka, którą masz (0 = nie sprawdzamy): brak → bad, zostaje mniej niż pół roku najwyższej obsługi → warn.
+    const cashAvailable = Math.max(0, num(inp.cashAvailable));
+    const cashLeft = cashAvailable > 0 ? cashAvailable - peakCash : null;
+    const cashStatus = cashLeft === null ? null : cashLeft < 0 ? 'bad' : cashLeft < maxDebtService / 2 ? 'warn' : 'ok';
+    const risk = RANK[cashStatus] > RANK[status] ? cashStatus : status;
+
     return {
       loans, allCost, startCash: -rows[0].cash,
       target, status, minDscr, worstYear: worst ? worst.year : null,
@@ -358,7 +371,32 @@ const Calc = (() => {
       horizonMonths: H, end: { land: end.land, balance: end.debt, cumCash: end.cumCash },
       netGain, delta, npv: npvValue, irr: irrValue, altNetRate: altNet, rrso,
       rent: num(inp.rentPerHa) * area,
+      peakCash, peakMonth, cashAvailable, cashLeft, cashStatus, risk,
     };
+  }
+
+  const RANK = { ok: 0, warn: 1, bad: 2 };
+
+  // Bazowy i dwa stresy z parametrów — każdy osobnym przebiegiem.
+  function scenarios(inp, today) {
+    return {
+      base: run(inp, today),
+      stressRate: run(inp, today, { ratePp: num(inp.stressRatePp), rateFrom: inp.stressRateFrom }),
+      stressIncome: run(inp, today, { incomeFactor: 1 - num(inp.stressIncomePct) / 100 }),
+    };
+  }
+
+  // Werdykt łączny = najgorsze ryzyko (pokrycie i płynność) z bazowego i stresów; przy remisie wygrywa wcześniejszy.
+  function pickVerdict(sc) {
+    return ['base', 'stressRate', 'stressIncome'].reduce((w, key) => {
+      const risk = sc[key].summary.risk;
+      return !w || RANK[risk] > RANK[w.status] ? { status: risk, scenario: key } : w;
+    }, null);
+  }
+
+  function verdict(inp, today) {
+    const sc = scenarios(inp, today);
+    return { ...pickVerdict(sc), base: sc.base.summary };
   }
 
   function run(inp, today, opt) {
@@ -526,16 +564,15 @@ const Calc = (() => {
   }
 
   function calculate(inputs, today) {
-    const base = run(inputs, today);
-    const stressRate = run(inputs, today, { ratePp: num(inputs.stressRatePp), rateFrom: inputs.stressRateFrom });
-    const stressIncome = run(inputs, today, { incomeFactor: 1 - num(inputs.stressIncomePct) / 100 });
+    const sc = scenarios(inputs, today);
+    const { base, stressRate, stressIncome } = sc;
     const warnings = [];
     const p = base.purchase;
     if (p.loan <= 0) warnings.push('Wkład własny pokrywa całą cenę — kredyt nie jest potrzebny.');
     if (num(inputs.graceMonths) >= base.N) warnings.push('Karencja nie może trwać przez cały okres kredytu — skrócono ją.');
     if (base.inflow > p.outlay + 0.5) warnings.push('Dodatkowe kredyty na zakup przekraczają gotówkę potrzebną na start — nadwyżka liczy się jako gotówka.');
     return {
-      base, stressRate, stressIncome,
+      base, stressRate, stressIncome, verdict: pickVerdict(sc),
       thresholds: thresholds(inputs, today, base.summary.target),
       grid: grid(inputs, today), gridRates: GRID_RATES, gridIncome: GRID_INCOME,
       mc: monteCarlo(inputs, base),
@@ -543,7 +580,7 @@ const Calc = (() => {
     };
   }
 
-  return { calculate, simulate, summarize, monteCarlo, pmt, interest, npv, irr, solve, annualize, incomePerHa, purchase, monthIndex, monthKey };
+  return { calculate, verdict, simulate, summarize, monteCarlo, pmt, interest, npv, irr, solve, annualize, incomePerHa, purchase, monthIndex, monthKey };
 })();
 if (typeof window === 'object') window.Calc = Calc;
 if (typeof module === 'object') module.exports = Calc; // Node: test/calc.check.js
