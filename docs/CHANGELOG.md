@@ -1,5 +1,28 @@
 # Changelog
 
+## v8 — 2026-10-16
+
+- **Prostszy dochód z ziemi:** zamiast trybu, uprawy, plonu, ceny skupu, kosztów, dopłat i podatku — dwa pola:
+  przychód z ha i zysk z ha. Zmienność, korekty lat i symulacja wahają przychód; reszta (przychód − zysk) jest stała.
+  „Plon progowy” → „przychód progowy”. Stare scenariusze i szkic przeliczane w `withDefaults` — wynik bez zmian.
+- Check: 69 sprawdzeń.
+
+## v7 — 2026-10-16
+
+- **Pusty start:** pierwsze uruchomienie i „Wyczyść dane” dają formularz bez przykładowych wartości — wpisana jest tylko
+  stopa referencyjna i założenia oceny (lokata, bufor, stres test, zmienność, dzień raty). Do czasu uzupełnienia
+  wynik pokazuje listę brakujących pól. Puste pole do uzupełnienia jest szare, nie czerwone.
+- Pola, gdzie 0 jest naturalne (wycena, inne koszty, karencja, ubezpieczenie, nadwyżka gospodarstwa, wzrost dochodu,
+  czynsz dzierżawny): puste = 0.
+- `DEFAULTS` bez zmian — zapisane scenariusze i istniejący szkic liczą się tak samo. Zapis scenariusza nie przenosi `null`.
+- Check: 67 sprawdzeń.
+
+## v6 — 2026-10-16
+
+- **Zobowiązanie bez oprocentowania:** opcja „stałe (także 0%)” i podpowiedź przy oprocentowaniu stałym —
+  np. rozłożona płatność syndykowi. Model bez zmian (już liczył 0%), dodany check.
+- Check: 66 sprawdzeń.
+
 ## v5 — 2026-10-16
 
 - **Werdykt z najgorszego scenariusza:** werdykt na ekranie Wynik, w arkuszu parametrów, na liście i w porównaniu

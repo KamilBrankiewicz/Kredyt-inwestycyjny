@@ -1,7 +1,8 @@
 // node test/calc.check.js — jedyny automatyczny check: asserty silnika (bez npm).
 const assert = require('node:assert/strict');
 const Calc = require('../js/calc.js');
-const { DEFAULTS, EXTRA_LOAN_DEFAULTS, withDefaults, validateImport } = require('../js/storage.js');
+const Storage = require('../js/storage.js');
+const { DEFAULTS, EXTRA_LOAN_DEFAULTS, withDefaults, validateImport } = Storage;
 
 const TODAY = '2026-10-13';
 const near = (actual, expected, tol, msg) =>
@@ -9,6 +10,32 @@ const near = (actual, expected, tol, msg) =>
 const inputs = (patch) => withDefaults({ ...DEFAULTS, startMonth: '2026-11', ...patch });
 let n = 0;
 const check = (name, fn) => { fn(); n++; console.log('ok', name); };
+
+check('pusty start: pola z DEFAULTS, stopa referencyjna wpisana', () => {
+  Storage.BLANK_START.forEach((k) => assert.ok(k in DEFAULTS, k));
+  assert.ok(!Storage.BLANK_START.includes('baseRate'));
+  assert.equal(Storage.blankInputs().areaHa, null);
+  assert.equal(Storage.blankInputs().baseRate, DEFAULTS.baseRate);
+});
+
+check('stary dochód (plon/cena/koszty albo kwotą) → przychód i zysk, wynik bez zmian', () => {
+  const old = withDefaults({ incomeMode: 'detailed', yieldT: 8, pricePerT: 1000, directCostsPerHa: 4000, subsidiesPerHa: 900, landTaxPerHa: 300 });
+  assert.equal(old.revenuePerHa, 8000);
+  assert.equal(old.profitPerHa, 4600);
+  assert.ok(!('yieldT' in old) && !('incomeMode' in old));
+  const simple = withDefaults({ incomeMode: 'simple', netIncomePerHa: 2500 });
+  assert.equal(simple.revenuePerHa, 2500);
+  assert.equal(simple.profitPerHa, 2500);
+  const legacyDefaults = withDefaults({ incomeMode: 'detailed' });
+  assert.equal(legacyDefaults.revenuePerHa, DEFAULTS.revenuePerHa);
+  assert.equal(legacyDefaults.profitPerHa, DEFAULTS.profitPerHa);
+  assert.equal(withDefaults({ incomeMode: 'detailed', yieldT: null }).revenuePerHa, null);
+});
+
+check('przychód progowy: zysk przy nim = wymagany dochód/ha', () => {
+  const s = Calc.calculate(inputs({}), TODAY).base.summary;
+  near(s.thresholdRevenue - (DEFAULTS.revenuePerHa - DEFAULTS.profitPerHa), s.requiredPerHa, 1e-9, 'próg');
+});
 
 check('PMT 100 000 zł, 6%, 120 mies.', () => near(Calc.pmt(100000, 6, 120), 1110.21, 0.005, 'PMT'));
 check('PMT 500 000 zł, 6%, 300 mies.', () => near(Calc.pmt(500000, 6, 300), 3221.51, 0.005, 'PMT'));
@@ -86,7 +113,7 @@ check('wymagany dochód = najwyższa roczna obsługa długu × bufor; pokrycie l
 });
 
 check('próg stopy: przy znalezionym przesunięciu min. pokrycie = bufor', () => {
-  const inp = inputs({ yieldT: 11 });
+  const inp = inputs({ revenuePerHa: 9900, profitPerHa: 6850 });
   const r = Calc.calculate(inp, TODAY);
   const shift = r.thresholds.rateShift.value;
   assert.ok(shift !== null, 'próg wyznaczony');
@@ -111,7 +138,7 @@ check('próg ceny i wkładu: na progu min. pokrycie = bufor', () => {
 });
 
 check('próg niewyznaczalny → null z przyczyną, bez NaN', () => {
-  const t = Calc.calculate(inputs({ incomeMode: 'simple', netIncomePerHa: -100 }), TODAY).thresholds;
+  const t = Calc.calculate(inputs({ profitPerHa: -100 }), TODAY).thresholds;
   assert.equal(t.rateShift.value, null);
   assert.equal(t.rateShift.reason, 'never');
 });
@@ -127,7 +154,7 @@ check('horyzont < okres kredytu: saldo do spłaty odjęte od wyniku', () => {
 check('zwrot majątkowy bez kosztów i bez wzrostu = od razu; z kosztami później', () => {
   const zero = Calc.calculate(inputs({ pccExempt: true, notaryCosts: 0, valuationCosts: 0, feePct: 0 }), TODAY).base.summary;
   assert.equal(zero.paybackWealth0, 0);
-  const costs = Calc.calculate(inputs({ yieldT: 11 }), TODAY).base.summary;
+  const costs = Calc.calculate(inputs({ revenuePerHa: 9900, profitPerHa: 6850 }), TODAY).base.summary;
   assert.ok(costs.paybackWealth0 > 0);
 });
 
@@ -142,7 +169,7 @@ check('korekta roku: −50% przychodu w roku żniw, koszty bez zmian', () => {
   const base = Calc.simulate(inputs({}), TODAY);
   const year = base.harvests[2].year;
   const sim = Calc.simulate(inputs({ incomeYearPct: { [year]: -50 } }), TODAY);
-  const rev = DEFAULTS.yieldT * DEFAULTS.pricePerT, net = Calc.incomePerHa(DEFAULTS);
+  const rev = DEFAULTS.revenuePerHa, net = DEFAULTS.profitPerHa;
   near(sim.harvests[2].income, (rev * 0.5 + net - rev) * DEFAULTS.areaHa, 1e-6, 'dochód w roku z korektą');
   near(sim.harvests[1].income, base.harvests[1].income, 1e-9, 'inne lata bez zmian');
 });
@@ -229,6 +256,13 @@ check('stałe oprocentowanie: stres stopy nie zmienia rat tego kredytu', () => {
   assert.ok(r.stressRate.loans[0].rows[30].payment > r.base.loans[0].rows[30].payment, 'kredyt na ziemię w stresie wyższy');
 });
 
+check('zobowiązanie 0% (np. syndyk): raty równe kwota / liczba rat, zero odsetek', () => {
+  const sim = Calc.simulate(inputs({ extraLoans: [extra({ purpose: 'existing', amount: 120000, months: 60, rateType: 'fixed', fixedRate: 0 })] }), TODAY);
+  const pays = sim.loans[1].rows.filter((r) => r.isPayment);
+  assert.equal(pays.length, 60);
+  pays.forEach((r) => { near(r.payment, 2000, 1e-6, 'rata'); assert.equal(r.interest, 0); });
+});
+
 check('zmienne oprocentowanie dodatkowego kredytu idzie za zmianami stopy referencyjnej', () => {
   const sim = Calc.simulate(inputs({ rateOverrides: { '2028-03': 6 }, extraLoans: [extra({ margin: 1 })] }), TODAY);
   const rateIn = (key) => sim.loans[1].rows.find((r) => r.date.startsWith(key)).rate;
@@ -237,7 +271,7 @@ check('zmienne oprocentowanie dodatkowego kredytu idzie za zmianami stopy refere
 });
 
 check('próg stopy z dwoma kredytami: na progu min. pokrycie = bufor', () => {
-  const inp = inputs({ yieldT: 12, extraLoans: [extra({ amount: 50000, margin: 4 })] });
+  const inp = inputs({ revenuePerHa: 10800, profitPerHa: 7750, extraLoans: [extra({ amount: 50000, margin: 4 })] });
   const t = Calc.calculate(inp, TODAY).thresholds;
   assert.ok(t.rateShift.value !== null);
   near(Calc.summarize(Calc.simulate(inp, TODAY, { ratePp: t.rateShift.value }), inp).minDscr, inp.dscrTarget, 1e-4, 'pokrycie na progu');

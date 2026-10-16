@@ -249,6 +249,8 @@ tr.deficit td.dscr { color: var(--danger); }
 .hint:empty, .error:empty { display: none; }
 .error { font-size: 0.8rem; color: var(--danger); margin-top: 3px; }
 .field.invalid .input-wrap { border-color: var(--danger); }
+.field.missing .error { color: var(--text-muted); }
+.missing-list { margin: 4px 0 12px 18px; }
 details.adv { border: 1px solid var(--border); border-radius: var(--radius-small); padding: 0 12px; margin-bottom: 10px; }
 details.adv > summary { cursor: pointer; padding: 10px 0; color: var(--text-muted); font-size: 0.9rem; }
 details.adv[open] > summary { margin-bottom: 4px; }

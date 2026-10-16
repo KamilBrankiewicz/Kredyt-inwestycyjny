@@ -41,7 +41,7 @@ index.html → app.js → ui.js → calc.js          (liczy; zero DOM, zero Stor
 | Klucz | Zawartość | Eksport |
 |---|---|---|
 | `kredyt.scenarios` | `Scenario[]` z nagrobkami (`{ id, deleted: true, updatedAt }`) | tak |
-| `kredyt.draft` | bieżące parametry, zapis przy każdej zmianie | nie |
+| `kredyt.draft` | bieżące parametry, zapis przy każdej zmianie; brak szkicu → `blankInputs()` (pola `BLANK_START` = `null`, użytkownik je wpisuje) | nie |
 | `kredyt.theme` | `auto` / `dark` / `light` | nie |
 
 `Scenario = { id, name, notes, inputs, createdAt, updatedAt }`. `inputs` zawsze czytane przez
@@ -61,7 +61,7 @@ To decyzje, nie braki — nie zmieniaj z własnej inicjatywy:
 
 - brak automatycznego pobierania WIBOR/WIRON, cen ziemi i płodów,
 - brak podatku dochodowego, dopłat do oprocentowania (ARiMR — V2), nadpłat, transz, kredytów walutowych,
-- jedna uprawa na całej kupionej ziemi; zakup obejmuje tylko ziemię,
+- dochód z kupionej ziemi jako przychód i zysk z ha (bez rozbicia na uprawy, plon i koszty); zakup obejmuje tylko ziemię,
 - inflacja tylko przez parametry „wzrost %/rok”,
 - brak synca w v1, brak wywołań sieciowych; jedyny automatyczny check to `test/calc.check.js`,
 - wykresy bez biblioteki (inline SVG),

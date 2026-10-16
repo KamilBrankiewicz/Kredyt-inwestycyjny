@@ -75,11 +75,7 @@ const Calc = (() => {
 
   // ---- wielkości pochodne od parametrów ----
 
-  function incomePerHa(inp) {
-    return inp.incomeMode === 'simple'
-      ? num(inp.netIncomePerHa)
-      : num(inp.yieldT) * num(inp.pricePerT) - num(inp.directCostsPerHa) + num(inp.subsidiesPerHa) - num(inp.landTaxPerHa);
-  }
+  const incomePerHa = (inp) => num(inp.profitPerHa);
 
   function purchase(inp) {
     const price = num(inp.areaHa) * num(inp.pricePerHa);
@@ -191,9 +187,9 @@ const Calc = (() => {
     const inflow = loans.reduce((s, l) => s + (l.purpose === 'own' ? l.net : 0), 0);
 
     const annualIncome = incomePerHa(inp) * num(inp.areaHa) * incomeFactor;
-    // Dochód z ha = część zmienna (przychód: plon × cena, w trybie „kwotą” cały dochód) + część stała.
+    // Zysk z ha = część zmienna (przychód) + część stała (zysk − przychód: koszty, dopłaty, podatek).
     // Korekty roczne i zmienność w symulacji dotyczą części zmiennej.
-    const revPerHa = inp.incomeMode === 'simple' ? num(inp.netIncomePerHa) : num(inp.yieldT) * num(inp.pricePerT);
+    const revPerHa = num(inp.revenuePerHa);
     const fixedPerHa = incomePerHa(inp) - revPerHa;
     const yearPct = inp.incomeYearPct || {};
     const incomeGrowth = num(inp.incomeGrowthPct) / 100;
@@ -311,9 +307,8 @@ const Calc = (() => {
     const requiredIncome = Math.max(0, maxDebtService * target - farmIncome);
     const area = num(inp.areaHa);
     const requiredPerHa = area > 0 ? requiredIncome / area : null;
-    const thresholdYield = inp.incomeMode !== 'simple' && num(inp.pricePerT) > 0 && requiredPerHa !== null
-      ? (requiredPerHa + num(inp.directCostsPerHa) - num(inp.subsidiesPerHa) + num(inp.landTaxPerHa)) / num(inp.pricePerT)
-      : null;
+    // Przychód z ha, przy którym zysk = wymagany (koszty stałe bez zmian).
+    const thresholdRevenue = requiredPerHa !== null ? requiredPerHa + num(inp.revenuePerHa) - num(inp.profitPerHa) : null;
     const deficitYears = loanYears.filter((y) => y.income + y.farmIncome < y.debtService);
     const shortfall = deficitYears.reduce((s, y) => s + (y.debtService - y.income - y.farmIncome), 0);
     const status = minDscr >= target ? 'ok' : minDscr >= 1 ? 'warn' : 'bad';
@@ -364,7 +359,7 @@ const Calc = (() => {
       firstInstallmentMonthly: firstInstallment / freq, maxInstallmentMonthly: maxInstallment / freq,
       totalInterest, totalPaid, loanCostsTotal,
       totalCost: main.totalCost,
-      maxDebtService, requiredIncome, requiredPerHa, requiredMonthly: requiredIncome / 12, thresholdYield,
+      maxDebtService, requiredIncome, requiredPerHa, requiredMonthly: requiredIncome / 12, thresholdRevenue,
       expectedIncome: sim.annualIncome, expectedPerHa: incomePerHa(inp), farmIncome,
       deficitYears: deficitYears.map((y) => y.year), shortfall,
       paybackCash, paybackWealth, paybackWealth0,

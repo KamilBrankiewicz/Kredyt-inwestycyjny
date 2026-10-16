@@ -79,15 +79,9 @@ const UI = (() => {
 
   // ---------------------------------------------------------------- definicja formularza
 
-  const CROPS = [
-    ['pszenica', 'pszenica'], ['jęczmień', 'jęczmień'], ['żyto', 'żyto'], ['pszenżyto', 'pszenżyto'],
-    ['kukurydza', 'kukurydza na ziarno'], ['rzepak', 'rzepak'], ['buraki', 'buraki cukrowe'],
-    ['ziemniaki', 'ziemniaki'], ['inna', 'inna uprawa'],
-  ];
   const FREQ = [[1, 'co miesiąc'], [3, 'co kwartał'], [6, 'co pół roku'], [12, 'raz w roku']];
   const FREQ_NAME = { 1: 'miesięczna', 3: 'kwartalna', 6: 'półroczna', 12: 'roczna' };
   const MONTH_OPTS = MONTHS.map((m, i) => [i + 1, cap(m)]);
-  const detailed = (i) => i.incomeMode !== 'simple';
   const price = (i) => (+i.areaHa || 0) * (+i.pricePerHa || 0);
 
   // Pole: k, label, t ('num' domyślnie | 'sel' | 'chk' | 'month' | 'date'), unit, min, max(i), int, dec,
@@ -108,8 +102,8 @@ const UI = (() => {
         { k: 'notaryCosts', label: 'Notariusz i wpis do księgi wieczystej', unit: 'zł', min: 0, hint: (i, c) => 'Wszystkie koszty zakupu: ' + zl(c.p.oneOff) },
         {
           adv: 'Inne koszty zakupu', fields: [
-            { k: 'valuationCosts', label: 'Operat szacunkowy (wycena)', unit: 'zł', min: 0 },
-            { k: 'otherCosts', label: 'Inne koszty jednorazowe', unit: 'zł', min: 0 },
+            { k: 'valuationCosts', label: 'Operat szacunkowy (wycena)', unit: 'zł', min: 0, optional: true },
+            { k: 'otherCosts', label: 'Inne koszty jednorazowe', unit: 'zł', min: 0, optional: true },
           ],
         },
       ],
@@ -128,12 +122,12 @@ const UI = (() => {
             { k: 'feePct', label: 'Prowizja', unit: '%', min: 0, max: () => 10, dec: 2, hint: (i, c) => zl(c.p.fee) },
             { k: 'feeFinanced', t: 'chk', label: 'Prowizja doliczona do kredytu' },
             {
-              k: 'graceMonths', label: 'Karencja w spłacie kapitału', unit: 'mies.', min: 0, int: true,
+              k: 'graceMonths', label: 'Karencja w spłacie kapitału', unit: 'mies.', min: 0, int: true, optional: true,
               max: (i) => (+i.loanYears || 1) * 12 - (+i.frequency || 1), maxMsg: 'Karencja musi być krótsza niż okres kredytu.',
             },
             { k: 'graceType', t: 'sel', label: 'W karencji', opts: [['interest', 'płacę same odsetki'], ['capitalize', 'odsetki doliczane do salda']], show: (i) => +i.graceMonths > 0 },
             { k: 'paymentDay', label: 'Dzień płatności raty', min: 1, max: () => 28, int: true },
-            { k: 'yearlyLoanCosts', label: 'Ubezpieczenie i inne koszty kredytu', unit: 'zł/rok', min: 0 },
+            { k: 'yearlyLoanCosts', label: 'Ubezpieczenie i inne koszty kredytu', unit: 'zł/rok', min: 0, optional: true },
             { custom: 'overrides' },
           ],
         },
@@ -142,7 +136,7 @@ const UI = (() => {
     {
       title: 'Obecne gospodarstwo i inne kredyty', fields: [
         {
-          k: 'farmIncome', label: 'Nadwyżka z obecnego gospodarstwa na raty', unit: 'zł/rok', min: 0,
+          k: 'farmIncome', label: 'Nadwyżka z obecnego gospodarstwa na raty', unit: 'zł/rok', min: 0, optional: true,
           hint: () => 'Dochód gospodarstwa bez kupowanej ziemi, po kosztach i utrzymaniu rodziny. Liczy się tylko do pokrycia rat; zysk i zwrot z zakupu liczymy bez niej.',
         },
         {
@@ -154,22 +148,23 @@ const UI = (() => {
     },
     {
       title: 'Dochód z kupionej ziemi', fields: [
-        { k: 'incomeMode', t: 'sel', label: 'Jak podać dochód', opts: [['detailed', 'z plonu i ceny'], ['simple', 'jedną kwotą na ha']] },
-        { k: 'netIncomePerHa', label: 'Dochód netto z ha', unit: 'zł/ha', min: -100000, show: (i) => !detailed(i), hint: () => 'Po kosztach uprawy i podatku rolnym, przed ratą kredytu.' },
-        { k: 'cropName', t: 'sel', label: 'Uprawa', opts: CROPS, show: detailed },
-        { k: 'yieldT', label: 'Plon', unit: 't/ha', min: 0, max: () => 200, dec: 2, show: detailed },
-        { k: 'pricePerT', label: 'Cena skupu', unit: 'zł/t', min: 0, show: detailed },
-        { k: 'directCostsPerHa', label: 'Koszty bezpośrednie (nasiona, nawozy, środki, paliwo, usługi)', unit: 'zł/ha', min: 0, show: detailed },
-        { k: 'subsidiesPerHa', label: 'Dopłaty bezpośrednie', unit: 'zł/ha', min: 0, show: detailed },
-        { k: 'landTaxPerHa', label: 'Podatek rolny', unit: 'zł/ha', min: 0, show: detailed },
+        {
+          k: 'revenuePerHa', label: 'Przychód (dochód brutto) z ha', unit: 'zł/ha', min: 0,
+          hint: () => 'Ze sprzedaży plonu, przed kosztami. Ta część waha się z roku na rok — od niej liczymy odchylenia.',
+        },
+        {
+          k: 'profitPerHa', label: 'Zysk z ha', unit: 'zł/ha', min: -100000,
+          hint: (i) => 'Po kosztach uprawy, z dopłatami, po podatku rolnym, przed ratą kredytu.' +
+            (i.revenuePerHa != null && i.profitPerHa != null ? ' Koszty stałe (przychód − zysk): ' + zl(i.revenuePerHa - i.profitPerHa) + '/ha.' : ''),
+        },
         {
           k: 'incomeMonth', t: 'sel', label: 'Miesiąc wpływu dochodu', opts: MONTH_OPTS, numeric: true,
-          hint: (i, c) => 'Dochód netto: ' + zl(c.perHa) + '/ha · ' + zl(c.perHa * (+i.areaHa || 0)) + '/rok',
+          hint: (i, c) => 'Zysk: ' + zl(c.perHa * (+i.areaHa || 0)) + '/rok',
         },
         {
           adv: 'Wzrost dochodu, dzierżawa', fields: [
-            { k: 'incomeGrowthPct', label: 'Wzrost dochodu', unit: '%/rok', min: -20, max: () => 20, dec: 2 },
-            { k: 'rentPerHa', label: 'Czynsz dzierżawny w okolicy (dla porównania)', unit: 'zł/ha', min: 0 },
+            { k: 'incomeGrowthPct', label: 'Wzrost dochodu', unit: '%/rok', min: -20, max: () => 20, dec: 2, optional: true },
+            { k: 'rentPerHa', label: 'Czynsz dzierżawny w okolicy (dla porównania)', unit: 'zł/ha', min: 0, optional: true },
           ],
         },
         {
@@ -177,7 +172,7 @@ const UI = (() => {
             {
               k: 'incomeVolatilityPct', label: 'Zmienność przychodu z roku na rok', unit: '±%', min: 0, max: () => 100, dec: 1,
               hint: (i) => (+i.incomeVolatilityPct > 0
-                ? `Odchylenie standardowe ${detailed(i) ? 'plonu × ceny' : 'dochodu'}. Mniej więcej co szósty rok wypada o ponad ${num(+i.incomeVolatilityPct, 0)}% gorzej od założeń. 0 = bez symulacji.`
+                ? `Odchylenie standardowe przychodu; koszty stałe się nie wahają. Mniej więcej co szósty rok wypada o ponad ${num(+i.incomeVolatilityPct, 0)}% gorzej od założeń. 0 = bez symulacji.`
                 : 'Symulacja wyłączona.'),
             },
             { custom: 'yearIncome' },
@@ -189,7 +184,7 @@ const UI = (() => {
       title: 'Ocena', fields: [
         {
           k: 'horizonYears', label: 'Horyzont analizy', unit: 'lat', min: 0, max: () => 50, int: true, optional: true,
-          placeholder: (i) => String(i.loanYears), hint: () => 'Puste = okres kredytu.',
+          placeholder: (i) => String(i.loanYears ?? ''), hint: () => 'Puste = okres kredytu.',
         },
         { k: 'landGrowthPct', label: 'Wzrost ceny ziemi', unit: '%/rok', min: -20, max: () => 20, dec: 2, hint: () => '0 = wariant ostrożny.' },
         { k: 'alternativeRate', label: 'Stopa alternatywna (lokata, obligacje)', unit: '%', min: 0, max: () => 30, dec: 2, hint: (i) => 'Po podatku Belki: ' + pct((+i.alternativeRate || 0) * 0.81, 2) },
@@ -226,12 +221,12 @@ const UI = (() => {
     { k: 'months', label: 'Okres (przy istniejącym: pozostały)', unit: 'mies.', min: 1, max: () => 480, int: true, hint: (l) => formatMonths(+l.months || 0) },
     { k: 'frequency', t: 'sel', label: 'Raty płatne', opts: FREQ, numeric: true },
     { k: 'installmentType', t: 'sel', label: 'Rodzaj rat', opts: [['annuity', 'równe'], ['decreasing', 'malejące']] },
-    { k: 'rateType', t: 'sel', label: 'Oprocentowanie', opts: [['variable', 'zmienne: stopa referencyjna + marża'], ['fixed', 'stałe']] },
+    { k: 'rateType', t: 'sel', label: 'Oprocentowanie', opts: [['variable', 'zmienne: stopa referencyjna + marża'], ['fixed', 'stałe (także 0%)']] },
     {
       k: 'margin', label: 'Marża', unit: 'pp', min: 0, max: () => 20, dec: 2, show: variable,
       hint: (l) => 'Oprocentowanie: ' + pct((+inputs.baseRate || 0) + (+l.margin || 0), 2) + '. Stopa referencyjna i jej zmiany jak w kredycie na ziemię.',
     },
-    { k: 'fixedRate', label: 'Oprocentowanie stałe', unit: '%', min: 0, max: () => 30, dec: 2, show: (l) => !variable(l), hint: () => 'Stres stopy i progi stopy go nie zmieniają.' },
+    { k: 'fixedRate', label: 'Oprocentowanie stałe', unit: '%', min: 0, max: () => 30, dec: 2, show: (l) => !variable(l), hint: () => '0% = bez oprocentowania (np. rozłożona płatność syndykowi). Stres stopy i progi stopy go nie zmieniają.' },
     { k: 'feePct', label: 'Prowizja', unit: '%', min: 0, max: () => 10, dec: 2, show: own, hint: (l) => zl((+l.amount || 0) * (+l.feePct || 0) / 100) + ', płatna z wypłaty' },
     {
       k: 'graceMonths', label: 'Karencja w spłacie kapitału', unit: 'mies.', min: 0, int: true,
@@ -265,7 +260,7 @@ const UI = (() => {
   function fieldValue(f, src = inputs) {
     const v = src[f.k];
     if (f.t === 'month' || f.t === 'date' || f.t === 'text') return v || '';
-    if (f.optional && !v) return '';
+    if (v == null || (f.optional && !v)) return '';
     return inputFmt(f.dec || 0).format(v);
   }
 
@@ -443,8 +438,10 @@ const UI = (() => {
       const hint = wrap.querySelector('.hint');
       if (hint) hint.textContent = f.hint ? f.hint(inputs, ctx) : '';
       const err = wrap.querySelector('.error');
-      if (err) err.textContent = errors[f.k] || '';
-      wrap.classList.toggle('invalid', !!errors[f.k]);
+      const missing = !!errors[f.k] && inputs[f.k] == null; // jeszcze nie wpisane — bez czerwieni
+      if (err) err.textContent = missing ? 'Uzupełnij.' : errors[f.k] || '';
+      wrap.classList.toggle('invalid', !!errors[f.k] && !missing);
+      wrap.classList.toggle('missing', missing);
       if (f.placeholder) { const el = $('f-' + f.k); if (el) el.placeholder = f.placeholder(inputs); }
     });
     inputs.extraLoans.forEach((l, n) => EXTRA_FIELDS.forEach((f) => {
@@ -475,7 +472,7 @@ const UI = (() => {
   function recalc(immediate) {
     clearTimeout(recalcTimer);
     const go = () => {
-      if (!hasErrors() || !result) result = Calc.calculate(inputs, todayIso());
+      if (!hasErrors()) result = Calc.calculate(inputs, todayIso());
       Storage.saveDraft(inputs);
       renderAll();
     };
@@ -554,8 +551,25 @@ const UI = (() => {
     return m ? ' (' + humanMonth(rows[m].date) + ')' : '';
   }
 
+  // Pola liczbowe, których użytkownik jeszcze nie wpisał (pusty start).
+  const missingFields = () => FIELDS.filter((f) => (!f.t || f.t === 'num') && !f.optional && inputs[f.k] == null && !(f.show && !f.show(inputs)));
+
+  function renderStart() {
+    const list = missingFields().map((f) => '<li>' + escapeHtml(f.label) + '</li>').join('');
+    const note = '<div class="empty">Wpisz parametry zakupu, kredytu i dochodu — wynik pojawi się, gdy wszystkie będą uzupełnione.</div>';
+    $('verdict').innerHTML = '<div class="card"><h3>Uzupełnij parametry</h3>' +
+      '<p class="small muted">Stopa referencyjna i założenia oceny są wpisane. Resztę podajesz Ty.</p>' +
+      (list ? '<p class="small">Brakuje:</p><ul class="small missing-list">' + list + '</ul>' : '<p class="warn small">Popraw zaznaczone pola.</p>') +
+      '<button type="button" class="next-step" data-action="params">Uzupełnij parametry ›</button></div>';
+    $('sheet-verdict').innerHTML = '<span class="muted">Uzupełnij parametry</span>';
+    ['tiles', 'result-cards', 'schedule-note'].forEach((id) => { $(id).innerHTML = ''; });
+    $('schedule-table').innerHTML = note;
+    $('sensitivity').innerHTML = note;
+  }
+
   function renderAll() {
-    if (!result) return;
+    $('summary-bar').hidden = !result;
+    if (!result) { renderStart(); if (view === 'scenarios') renderScenarios(); return; }
     const stale = hasErrors();
     document.querySelectorAll('.view').forEach((v) => v.classList.toggle('stale', stale && v.id !== 'view-scenarios'));
     renderSheetVerdict();
@@ -569,13 +583,13 @@ const UI = (() => {
   function renderSheetVerdict() {
     const s = result.base.summary, v = result.verdict;
     $('sheet-verdict').innerHTML = hasErrors()
-      ? '<span class="warn">Popraw zaznaczone pola</span>'
+      ? '<span class="warn">Uzupełnij lub popraw zaznaczone pola</span>'
       : `${badge(v.status)} <b>${STATUS[v.status].label}</b>${v.scenario !== 'base' ? ' (w stres teście)' : ''}<br><span class="muted">rata ${zl(s.firstInstallment)} · wymagany ${zl(s.requiredIncome)}/rok</span>`;
   }
 
   function renderSummaryBar() {
     const i = inputs;
-    const income = detailed(i) ? `${CROPS.find((c) => c[0] === i.cropName)?.[1] || i.cropName} ${num(i.yieldT, 1)} t/ha` : `${zl(i.netIncomePerHa)}/ha`;
+    const income = `zysk ${zl(i.profitPerHa)}/ha`;
     const name = currentId ? (Storage.getScenario(currentId)?.name || '') : '';
     $('summary-bar').innerHTML = `<span>${name ? '<b>' + escapeHtml(name) + '</b> · ' : ''}${inputFmt(2).format(i.areaHa)} ha × ${zl(i.pricePerHa)} · ${yearsLabel(i.loanYears)} · ${pct(i.baseRate + i.margin, 2)}${i.extraLoans.length ? ' · + ' + i.extraLoans.length + ' ' + plural(i.extraLoans.length, 'kredyt', 'kredyty', 'kredytów') : ''} · ${escapeHtml(income)}</span><span class="edit">Zmień ›</span>`;
   }
@@ -637,7 +651,7 @@ const UI = (() => {
     const st = STATUS[v.status];
     const step = nextStep(v, s);
     const H = s.horizonMonths / 12;
-    $('verdict').innerHTML = (hasErrors() ? '<p class="stale-note">Popraw zaznaczone pola w parametrach — poniżej ostatni poprawny wynik.</p>' : '') +
+    $('verdict').innerHTML = (hasErrors() ? '<p class="stale-note">Uzupełnij lub popraw zaznaczone pola w parametrach — poniżej ostatni poprawny wynik.</p>' : '') +
       `<div class="card verdict ${v.status}">` +
       `<div class="verdict-status">${badge(v.status)}${st.label}</div>` +
       `<p class="verdict-cause">${verdictText(v)}</p>` +
@@ -651,7 +665,6 @@ const UI = (() => {
     // Kafle.
     const sr = result.stressRate.summary;
     const f = s.freq;
-    const crop = CROPS.find((c) => c[0] === inputs.cropName)?.[1] || '';
     const graceLine = inputs.graceMonths > 0
       ? `<br>w karencji: <b>${inputs.graceType === 'capitalize' ? '0 zł (odsetki doliczane)' : zl(s.firstPayment)}</b>` : '';
     const extras = s.loans.length > 1;
@@ -665,7 +678,7 @@ const UI = (() => {
       `<div class="tile"><div class="tile-label">Wymagany dochód${s.farmIncome > 0 ? ' z kupionej ziemi' : ''}</div>` +
       `<div class="tile-value">${zl(s.requiredIncome)}<span class="small muted"> /rok</span></div>` +
       `<div class="tile-sub"><b>${zl(s.requiredPerHa)}/ha</b> · ${zl(s.requiredMonthly)}/mies.` +
-      (s.thresholdYield !== null ? `<br>plon progowy: <b>${num(s.thresholdYield, 1)} t/ha</b>${crop ? ' (' + escapeHtml(crop) + ')' : ''}` : '') +
+      (s.thresholdRevenue !== null ? `<br>przychód progowy: <b>${zl(s.thresholdRevenue)}/ha</b>` : '') +
       `<br>zakładasz: ${zl(s.expectedPerHa)}/ha` +
       (s.farmIncome > 0 ? `<br>po odjęciu nadwyżki gospodarstwa ${zl(s.farmIncome)}/rok` : '') + '</div></div>',
 
@@ -705,7 +718,7 @@ const UI = (() => {
       kv('Bilans (bez odsetek od gotówki)', signedZl(s.netGain), true) +
       kv('Zysk vs lokata ' + pct(inputs.alternativeRate, 2), `<span class="${s.delta >= 0 ? 'pos' : 'neg'}">${signedZl(s.delta)}</span>`) +
       kv('NPV (dziś)', signedZl(s.npv)) + kv('IRR (roczna stopa zwrotu)', s.irr === null ? 'nie da się wyznaczyć' : pct(s.irr * 100, 2)) +
-      `<p class="muted small">Wydzierżawienie tej ziemi dałoby ok. ${zl(s.rent)}/rok (${zl(inputs.rentPerHa)}/ha); zakładany dochód z uprawy to ${zl(s.expectedIncome)}/rok.</p></div>`;
+      (s.rent > 0 ? `<p class="muted small">Wydzierżawienie tej ziemi dałoby ok. ${zl(s.rent)}/rok (${zl(inputs.rentPerHa)}/ha); zakładany dochód z uprawy to ${zl(s.expectedIncome)}/rok.</p>` : '') + '</div>';
   }
 
   const PURPOSE = { main: 'główny', own: 'na zakup', existing: 'istniejące' };
@@ -1142,6 +1155,7 @@ const UI = (() => {
     if (!btn) return;
     if (btn.dataset.goto) switchView(btn.dataset.goto);
     else if (btn.dataset.action === 'save') openSaveModal();
+    else if (btn.dataset.action === 'params') openParams();
   }
 
   function openParams() { $('params').classList.add('open'); }
@@ -1228,11 +1242,13 @@ const UI = (() => {
   function clearData() {
     Storage.clearAll();
     applyTheme('auto');
-    inputs = Storage.withDefaults({ startMonth: nextMonth(todayIso()) });
-    errors = {};
+    inputs = { ...Storage.blankInputs(), startMonth: nextMonth(todayIso()) };
+    result = null;
     currentId = null;
     compareIds.clear();
     renderForm();
+    readForm();
+    updateFormState();
     recalc(true);
     closeModal('modal-confirm');
     closeModal('modal-settings');
@@ -1254,6 +1270,8 @@ const UI = (() => {
     inputs = Storage.getDraft();
     if (Calc.monthIndex(inputs.startMonth) === null) inputs.startMonth = nextMonth(todayIso());
     renderForm();
+    readForm(); // puste pola → „Uzupełnij.”, wynik dopiero po wpisaniu wszystkich
+    updateFormState();
     $('fab-save').hidden = false;
     recalc(true);
   }

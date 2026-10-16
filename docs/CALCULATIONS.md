@@ -29,7 +29,7 @@ częstotliwość, rodzaj rat, karencja, dzień płatności, koszty roczne. Wszys
 | Pole | Reguła |
 |---|---|
 | Oprocentowanie zmienne | wspólna ścieżka stopy referencyjnej (`baseRate` + `rateOverrides`) + marża tego kredytu + stres; przesuwa je też próg stopy i siatka |
-| Oprocentowanie stałe | `fixedRate`; stres, próg stopy i siatka go nie zmieniają |
+| Oprocentowanie stałe | `fixedRate`; stres, próg stopy i siatka go nie zmieniają; 0% → rata = saldo / liczba rat (PMT przy r = 0) |
 | `purpose: 'own'` (na zakup) | wypłata `kwota − prowizja` wpływa do gotówki w `m = 0`; raty, saldo i koszty wchodzą do wszystkich wyników |
 | `purpose: 'existing'` (istniejące) | kwota = saldo do spłaty; raty i koszty wchodzą tylko do **obsługi długu** (pokrycie, werdykt, wymagany dochód, brakuje na raty, symulacja). Gotówka, majątek, bilans, NPV, zysk vs lokata i zwrot — bez niego, bo istnieje niezależnie od zakupu |
 
@@ -46,7 +46,7 @@ częstotliwość, rodzaj rat, karencja, dzień płatności, koszty roczne. Wszys
 Stała w każdym roku analizy; wchodzi **tylko do obsługi długu**, tak jak istniejące zobowiązania po stronie rat:
 
 - pokrycie roku = `(dochód z ziemi + F) / obsługa`; z niego werdykt, progi, symulacja zmiennych lat,
-- wymagany dochód (z kupionej ziemi) = `max(0, najwyższa obsługa × bufor − F)`; od niego plon progowy,
+- wymagany dochód (z kupionej ziemi) = `max(0, najwyższa obsługa × bufor − F)`; od niego przychód progowy,
 - brakuje na raty = suma `max(0, obsługa − dochód − F)`,
 - gotówka, majątek, bilans, NPV, zysk vs lokata i zwrot — bez `F` (gospodarstwo istnieje niezależnie od zakupu),
 - stres dochodu, korekty lat, zmienność w symulacji i oś „dochód” w siatce zmieniają tylko dochód z kupionej ziemi.
@@ -72,11 +72,10 @@ Stała w każdym roku analizy; wchodzi **tylko do obsługi długu**, tak jak ist
 
 ## Dochód z ha
 
-- tryb „z plonu”: `plon × cena − koszty bezpośrednie + dopłaty − podatek rolny`,
-- tryb „kwotą”: wpisany dochód netto.
-
-Część zmienna (przychód) = `plon × cena` w trybie „z plonu”, cały dochód netto w trybie „kwotą”; część stała = reszta
-(`− koszty + dopłaty − podatek rolny`). **Korekta roku** `incomeYearPct['RRRR']` (w %) mnoży część zmienną żniw
+Dwa pola: przychód z ha `revenuePerHa` (sprzedaż plonu) i zysk z ha `profitPerHa` (po kosztach, z dopłatami,
+po podatku rolnym). Dochód z ha = zysk. Część zmienna = przychód; część stała = `zysk − przychód` (koszty − dopłaty + podatek).
+Scenariusze sprzed v7 (plon × cena − koszty + dopłaty − podatek albo kwota netto) `withDefaults` przelicza na te dwa pola:
+przychód = `plon × cena` (w trybie „kwotą” = kwota), zysk = dawny dochód netto — wynik bez zmian. **Korekta roku** `incomeYearPct['RRRR']` (w %) mnoży część zmienną żniw
 w danym roku kalendarzowym: `max(0, 1 + korekta/100)`. Susza −50% obniża przychód o połowę, a koszty zostają.
 
 ## Wskaźniki (`summarize`)
@@ -91,7 +90,7 @@ w danym roku kalendarzowym: `max(0, 1 + korekta/100)`. Susza −50% obniża przy
 | Ryzyko scenariusza (`risk`) | gorszy z `status` i `cashStatus` |
 | Werdykt (`verdict`) | najgorsze `risk` z bazowego, stresu stopy i stresu dochodu; `scenario` = który go wyznacza (przy remisie wcześniejszy). Ten sam werdykt na liście i w porównaniu scenariuszy (`Calc.verdict`) |
 | Wymagany dochód | z kupionej ziemi: max(0, najwyższa roczna obsługa kredytu × bufor − nadwyżka gospodarstwa); też na ha i na miesiąc |
-| Plon progowy | `(wymagany dochód/ha + koszty − dopłaty + podatek rolny) / cena` (tryb „z plonu”) |
+| Przychód progowy | `wymagany dochód/ha + przychód − zysk` (koszty stałe bez zmian) |
 | Brakuje na raty | suma `obsługa − dochód − nadwyżka gospodarstwa` w latach, gdy ta różnica > 0 |
 | Zwrot gotówkowy | pierwszy miesiąc `m ≥ 1` w horyzoncie ze skumulowaną gotówką ≥ 0 |
 | Zwrot z wartością ziemi | pierwszy miesiąc w horyzoncie z majątkiem ≥ 0; również bez wzrostu ceny ziemi |

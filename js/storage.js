@@ -34,14 +34,8 @@ const Storage = (() => {
     farmIncome: 0,             // nadwyżka z obecnego gospodarstwa na raty, zł/rok; tylko do pokrycia (F13)
     cashAvailable: 0,          // gotówka na wkład, koszty i rezerwę, zł; 0 = bez sprawdzania płynności
     // Dochód z ziemi
-    incomeMode: 'detailed',    // 'simple' | 'detailed'
-    netIncomePerHa: 2500,
-    cropName: 'pszenica',
-    yieldT: 7.5,
-    pricePerT: 900,
-    directCostsPerHa: 3800,
-    subsidiesPerHa: 1000,
-    landTaxPerHa: 250,
+    revenuePerHa: 6750,        // przychód z ha (sprzedaż plonu) — zmienna część dochodu, od niej odchylenia
+    profitPerHa: 3700,         // zysk z ha po kosztach, z dopłatami, po podatku rolnym, przed ratą
     incomeMonth: 8,
     incomeGrowthPct: 0,
     rentPerHa: 1500,
@@ -102,8 +96,29 @@ const Storage = (() => {
     }
   }
 
+  // Do v7 dochód podawano z plonu, ceny i kosztów albo jedną kwotą. Przeliczamy na przychód i zysk z ha —
+  // to ten sam model (zmienny przychód + stała reszta), więc stare scenariusze liczą się tak samo.
+  const LEGACY_INCOME = { incomeMode: 'detailed', netIncomePerHa: 2500, cropName: '', yieldT: 7.5, pricePerT: 900, directCostsPerHa: 3800, subsidiesPerHa: 1000, landTaxPerHa: 250 };
+  function migrateIncome(src) {
+    if (!Object.keys(LEGACY_INCOME).some((k) => k in src)) return src;
+    const o = { ...LEGACY_INCOME, ...src };
+    const out = { ...src };
+    Object.keys(LEGACY_INCOME).forEach((k) => delete out[k]);
+    if (src.revenuePerHa !== undefined) return out;
+    const nums = (...ks) => (ks.some((k) => o[k] == null) ? null : ks.map((k) => +o[k]));
+    if (o.incomeMode === 'simple') {
+      out.revenuePerHa = out.profitPerHa = o.netIncomePerHa == null ? null : +o.netIncomePerHa;
+    } else {
+      const r = nums('yieldT', 'pricePerT');
+      const c = nums('directCostsPerHa', 'subsidiesPerHa', 'landTaxPerHa');
+      out.revenuePerHa = r && r[0] * r[1];
+      out.profitPerHa = r && c ? r[0] * r[1] - c[0] + c[1] - c[2] : null;
+    }
+    return out;
+  }
+
   function withDefaults(inputs) {
-    const src = inputs && typeof inputs === 'object' ? inputs : {};
+    const src = migrateIncome(inputs && typeof inputs === 'object' ? inputs : {});
     return {
       ...DEFAULTS, ...src,
       rateOverrides: { ...(src.rateOverrides || {}) },
@@ -113,7 +128,16 @@ const Storage = (() => {
   }
 
   // ---- szkic formularza ----
-  function getDraft() { return withDefaults(read(KEYS.draft, {})); }
+  // Nowy formularz (pierwsze uruchomienie, wyczyszczenie danych): dane użytkownika puste (null) — ma je wpisać.
+  // Stopa referencyjna i założenia oceny zostają z DEFAULTS. DEFAULTS bez zmian, więc stare scenariusze liczą się tak samo.
+  const BLANK_START = ['areaHa', 'pricePerHa', 'ownContribution', 'notaryCosts', 'valuationCosts', 'otherCosts',
+    'loanYears', 'margin', 'feePct', 'graceMonths', 'yearlyLoanCosts', 'farmIncome', 'revenuePerHa', 'profitPerHa',
+    'incomeGrowthPct', 'rentPerHa'];
+  function blankInputs() { return withDefaults(Object.fromEntries(BLANK_START.map((k) => [k, null]))); }
+  function getDraft() {
+    const d = read(KEYS.draft, null);
+    return d && typeof d === 'object' ? withDefaults(d) : blankInputs();
+  }
   function saveDraft(inputs) { return write(KEYS.draft, inputs); }
 
   // ---- scenariusze (z nagrobkami) ----
@@ -144,7 +168,8 @@ const Storage = (() => {
       id: prev ? prev.id : crypto.randomUUID(),
       name: String(name || '').trim() || 'Scenariusz',
       notes: String(notes || '').trim(),
-      inputs: withDefaults(inputs),
+      // Puste pola ukryte w formularzu (np. plon przy dochodzie kwotą) dostają DEFAULTS — scenariusz bez null.
+      inputs: withDefaults(Object.fromEntries(Object.entries(inputs).filter(([, v]) => v !== null))),
       createdAt: prev ? prev.createdAt : now,
       updatedAt: now,
     };
@@ -230,7 +255,7 @@ const Storage = (() => {
   function setTheme(t) { return write(KEYS.theme, t); }
 
   return {
-    DEFAULTS, EXTRA_LOAN_DEFAULTS, withDefaults, setErrorHandler,
+    DEFAULTS, EXTRA_LOAN_DEFAULTS, BLANK_START, withDefaults, blankInputs, setErrorHandler,
     getDraft, saveDraft,
     getScenarios, getScenario, saveScenario, deleteScenario, restoreScenario,
     mergeListBy, exportData, importData, validateImport, migrate, clearAll,
