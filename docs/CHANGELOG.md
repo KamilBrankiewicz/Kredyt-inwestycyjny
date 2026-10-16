@@ -1,5 +1,11 @@
 # Changelog
 
+## v10 — 2026-10-16
+
+- **Wyczyść formularz** na górze parametrów: pusty formularz (jak przy pierwszym uruchomieniu), zapisane scenariusze
+  zostają; „Cofnij” w toaście przywraca poprzednie wartości. Szkic sprzed v7 zachowuje swoje wartości — tym przyciskiem
+  zaczyna się od zera.
+
 ## v9 — 2026-10-16
 
 - **Aktualizacja dociera od razu:** SW instaluje pliki z sieci z pominięciem cache HTTP (wcześniej mógł zapisać stare

@@ -274,6 +274,7 @@ fieldset.extra-loan > legend { padding: 0 6px; font-weight: 600; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #0b1a13; }
 .btn-danger { color: var(--danger); border-color: var(--danger); }
 .btn-small { padding: 6px 12px; font-size: 0.88rem; }
+.form-clear { display: block; margin: 0 0 12px auto; }
 .btn-block { width: 100%; margin-bottom: 12px; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 

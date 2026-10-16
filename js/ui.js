@@ -329,7 +329,7 @@ const UI = (() => {
         : item(f))).join('') + '</div>').join('');
     // Zachowaj otwarte sekcje „Zaawansowane” przy ponownym renderze.
     const open = [...document.querySelectorAll('#params-form details.adv')].map((d) => d.open);
-    $('params-form').innerHTML = html;
+    $('params-form').innerHTML = '<button type="button" class="btn btn-small form-clear" data-action="form-clear">Wyczyść formularz</button>' + html;
     document.querySelectorAll('#params-form details.adv').forEach((d, n) => { if (open[n]) d.open = true; });
     updateFormState();
   }
@@ -516,6 +516,10 @@ const UI = (() => {
       rerenderOverrides();
       updateFormState();
       recalc(true);
+    } else if (action === 'form-clear') {
+      const prev = { inputs, currentId };
+      resetForm();
+      showUndoToast('Wyczyszczono formularz', () => { inputs = prev.inputs; currentId = prev.currentId; renderForm(); readForm(); updateFormState(); recalc(true); });
     } else if (action === 'el-add' || action === 'el-remove') {
       readForm();
       const list = [...inputs.extraLoans];
@@ -1239,17 +1243,22 @@ const UI = (() => {
 
   function confirmClear() { openModal('modal-confirm'); }
 
-  function clearData() {
-    Storage.clearAll();
-    applyTheme('auto');
+  // Pusty formularz (zapisane scenariusze zostają).
+  function resetForm() {
     inputs = { ...Storage.blankInputs(), startMonth: nextMonth(todayIso()) };
     result = null;
     currentId = null;
-    compareIds.clear();
     renderForm();
     readForm();
     updateFormState();
     recalc(true);
+  }
+
+  function clearData() {
+    Storage.clearAll();
+    applyTheme('auto');
+    compareIds.clear();
+    resetForm();
     closeModal('modal-confirm');
     closeModal('modal-settings');
     showToast('Wyczyszczono dane kalkulatora');
