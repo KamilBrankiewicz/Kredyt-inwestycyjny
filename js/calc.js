@@ -199,6 +199,8 @@ const Calc = (() => {
     const incomeGrowth = num(inp.incomeGrowthPct) / 100;
     const landGrowth = num(inp.landGrowthPct) / 100;
     const incomeMonth = clamp(Math.round(num(inp.incomeMonth, 8)), 1, 12);
+    // Nadwyżka z obecnego gospodarstwa: tylko do pokrycia obsługi długu, nie do gotówki i majątku z zakupu.
+    const farmIncome = Math.max(0, num(inp.farmIncome));
 
     // Sumy po kredytach w miesiącu m. Istniejące zobowiązania (ext*) wchodzą do obsługi długu i pokrycia,
     // ale nie do gotówki i majątku — istnieją niezależnie od zakupu.
@@ -257,10 +259,10 @@ const Calc = (() => {
       years.push({
         year: y, from: slice[0].date, to: slice[slice.length - 1].date,
         payments: sum('payment'), capital: sum('capital'), interest: sum('interest'), loanCosts: sum('loanCosts'),
-        debtService, income, cash: sum('cash'),
+        debtService, income, farmIncome, cash: sum('cash'),
         balance: slice[slice.length - 1].balance,
         rateMin: Math.min(...rates), rateMax: Math.max(...rates),
-        dscr: debtService > 0 ? income / debtService : Infinity,
+        dscr: debtService > 0 ? (income + farmIncome) / debtService : Infinity,
         inLoan: y <= Math.ceil(lastMonth / 12),
       });
     }
@@ -304,14 +306,16 @@ const Calc = (() => {
     loanYears.forEach((y) => { if (y.debtService > 0 && (!worst || y.dscr < worst.dscr)) worst = y; });
     const minDscr = worst ? worst.dscr : Infinity;
     const maxDebtService = loanYears.reduce((mx, y) => Math.max(mx, y.debtService), 0);
-    const requiredIncome = maxDebtService * target;
+    // Wymagany dochód z kupionej ziemi: (dochód + nadwyżka gospodarstwa) / obsługa ≥ bufor w każdym roku.
+    const farmIncome = Math.max(0, num(inp.farmIncome));
+    const requiredIncome = Math.max(0, maxDebtService * target - farmIncome);
     const area = num(inp.areaHa);
     const requiredPerHa = area > 0 ? requiredIncome / area : null;
     const thresholdYield = inp.incomeMode !== 'simple' && num(inp.pricePerT) > 0 && requiredPerHa !== null
       ? (requiredPerHa + num(inp.directCostsPerHa) - num(inp.subsidiesPerHa) + num(inp.landTaxPerHa)) / num(inp.pricePerT)
       : null;
-    const deficitYears = loanYears.filter((y) => y.income < y.debtService);
-    const shortfall = deficitYears.reduce((s, y) => s + (y.debtService - y.income), 0);
+    const deficitYears = loanYears.filter((y) => y.income + y.farmIncome < y.debtService);
+    const shortfall = deficitYears.reduce((s, y) => s + (y.debtService - y.income - y.farmIncome), 0);
     const status = minDscr >= target ? 'ok' : minDscr >= 1 ? 'warn' : 'bad';
 
     // Zwrot.
@@ -348,7 +352,7 @@ const Calc = (() => {
       totalInterest, totalPaid, loanCostsTotal,
       totalCost: main.totalCost,
       maxDebtService, requiredIncome, requiredPerHa, requiredMonthly: requiredIncome / 12, thresholdYield,
-      expectedIncome: sim.annualIncome, expectedPerHa: incomePerHa(inp),
+      expectedIncome: sim.annualIncome, expectedPerHa: incomePerHa(inp), farmIncome,
       deficitYears: deficitYears.map((y) => y.year), shortfall,
       paybackCash, paybackWealth, paybackWealth0,
       horizonMonths: H, end: { land: end.land, balance: end.debt, cumCash: end.cumCash },
@@ -403,13 +407,15 @@ const Calc = (() => {
   }
 
   // Siatka wrażliwości: min. pokrycie przy (zmiana stopy × zmiana dochodu).
-  // Pokrycie jest liniowe względem mnożnika dochodu, więc wystarczy jedna symulacja na wiersz.
+  // Harmonogram nie zależy od dochodu, więc wystarczy jedna symulacja na wiersz. Zmiana dochodu dotyczy
+  // dochodu z kupionej ziemi (jak stres dochodu); nadwyżka gospodarstwa zostaje stała.
   const GRID_RATES = [-1, 0, 1, 2, 3, 4];
   const GRID_INCOME = [-30, -15, 0, 15, 30];
   function grid(inp, today) {
     return GRID_RATES.map((pp) => {
-      const d = minDscrOf(inp, today, { ratePp: pp });
-      return { pp, cells: GRID_INCOME.map((pct) => ({ pct, dscr: d * (1 + pct / 100) })) };
+      const ys = simulate(inp, today, { ratePp: pp }).years.filter((y) => y.inLoan && y.debtService > 0);
+      const dscr = (pct) => Math.min(Infinity, ...ys.map((y) => (y.income * (1 + pct / 100) + y.farmIncome) / y.debtService));
+      return { pp, cells: GRID_INCOME.map((pct) => ({ pct, dscr: dscr(pct) })) };
     });
   }
 
@@ -469,8 +475,8 @@ const Calc = (() => {
         const income = y.income + diff[i];
         incomeByYear[i].push(income);
         if (y.inLoan && y.debtService > 0) {
-          minDscr = Math.min(minDscr, income / y.debtService);
-          shortfall += Math.max(0, y.debtService - income);
+          minDscr = Math.min(minDscr, (income + y.farmIncome) / y.debtService);
+          shortfall += Math.max(0, y.debtService - income - y.farmIncome);
         }
         return income;
       });

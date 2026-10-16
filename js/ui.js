@@ -139,7 +139,15 @@ const UI = (() => {
         },
       ],
     },
-    { title: 'Inne kredyty i zobowiązania', fields: [{ custom: 'extraLoans' }] },
+    {
+      title: 'Obecne gospodarstwo i inne kredyty', fields: [
+        {
+          k: 'farmIncome', label: 'Nadwyżka z obecnego gospodarstwa na raty', unit: 'zł/rok', min: 0,
+          hint: () => 'Dochód gospodarstwa bez kupowanej ziemi, po kosztach i utrzymaniu rodziny. Liczy się tylko do pokrycia rat; zysk i zwrot z zakupu liczymy bez niej.',
+        },
+        { custom: 'extraLoans' },
+      ],
+    },
     {
       title: 'Dochód z kupionej ziemi', fields: [
         { k: 'incomeMode', t: 'sel', label: 'Jak podać dochód', opts: [['detailed', 'z plonu i ceny'], ['simple', 'jedną kwotą na ha']] },
@@ -573,11 +581,15 @@ const UI = (() => {
     const tgt = pct(s.target * 100, 0);
     const k = s.loans.length > 1 ? `wszystkich ${s.loans.length} kredytów` : 'kredytu';
     if (!fin(s.minDscr)) return 'Bez kredytu — nie ma rat do pokrycia.';
-    if (s.status === 'ok') return `Dochód z ziemi pokrywa raty z zapasem: w najgorszym roku ${cov} rocznej obsługi ${k} (wymagane ${tgt}).`;
-    if (s.status === 'warn') return `Dochód pokrywa raty, ale bez wymaganego zapasu: w najgorszym roku ${cov} obsługi ${k}, a bufor to ${tgt}.`;
+    const farm = s.farmIncome > 0;
+    const src = farm ? 'Dochód z ziemi i gospodarstwa' : 'Dochód z ziemi';
+    if (s.status === 'ok') return `${src} pokrywa raty z zapasem: w najgorszym roku ${cov} rocznej obsługi ${k} (wymagane ${tgt}).`;
+    if (s.status === 'warn') return `${src} pokrywa raty, ale bez wymaganego zapasu: w najgorszym roku ${cov} obsługi ${k}, a bufor to ${tgt}.`;
     const n = s.deficitYears.length;
-    return `Dochód ${zl(s.expectedIncome)}/rok nie wystarcza na raty: w najgorszym roku pokrywa ${cov} obsługi ${k} (${zl(s.maxDebtService)}/rok). ` +
-      `Z reszty gospodarstwa trzeba dołożyć łącznie ${zl(s.shortfall)} w ${n} ${plural(n, 'roku', 'latach', 'latach')}.`;
+    const income = farm ? `${zl(s.expectedIncome)} + ${zl(s.farmIncome)} z gospodarstwa` : zl(s.expectedIncome);
+    return `Dochód ${income}/rok nie wystarcza na raty: w najgorszym roku pokrywa ${cov} obsługi ${k} (${zl(s.maxDebtService)}/rok). ` +
+      (farm ? `Ponad nadwyżkę gospodarstwa brakuje łącznie` : `Z reszty gospodarstwa trzeba dołożyć łącznie`) +
+      ` ${zl(s.shortfall)} w ${n} ${plural(n, 'roku', 'latach', 'latach')}.`;
   }
 
   function nextStep(s) {
@@ -617,11 +629,12 @@ const UI = (() => {
       `<div class="tile-value">${zl(s.firstInstallment)}</div>` +
       `<div class="tile-sub">${f > 1 ? `≈ <b>${zl(s.firstInstallmentMonthly)}</b> miesięcznie<br>` : ''}najwyższa ${zl(s.maxInstallment)} · przy ${pp(inputs.stressRatePp)}: <b>${zl(sr.maxInstallment)}</b>${graceLine}${allLine}</div></div>`,
 
-      `<div class="tile"><div class="tile-label">Wymagany dochód</div>` +
+      `<div class="tile"><div class="tile-label">Wymagany dochód${s.farmIncome > 0 ? ' z kupionej ziemi' : ''}</div>` +
       `<div class="tile-value">${zl(s.requiredIncome)}<span class="small muted"> /rok</span></div>` +
       `<div class="tile-sub"><b>${zl(s.requiredPerHa)}/ha</b> · ${zl(s.requiredMonthly)}/mies.` +
       (s.thresholdYield !== null ? `<br>plon progowy: <b>${num(s.thresholdYield, 1)} t/ha</b>${crop ? ' (' + escapeHtml(crop) + ')' : ''}` : '') +
-      `<br>zakładasz: ${zl(s.expectedPerHa)}/ha</div></div>`,
+      `<br>zakładasz: ${zl(s.expectedPerHa)}/ha` +
+      (s.farmIncome > 0 ? `<br>po odjęciu nadwyżki gospodarstwa ${zl(s.farmIncome)}/rok` : '') + '</div></div>',
 
       `<div class="tile"><div class="tile-label">Zwrot</div>` +
       `<div class="tile-value">${paybackText(s.paybackCash, s)}<span class="small muted"> gotówką</span></div>` +
@@ -878,7 +891,7 @@ const UI = (() => {
       const sum = (k) => ys.reduce((s, y) => s + y[k], 0);
       const rate = (y) => (y.rateMin === y.rateMax ? pct(y.rateMin, 2) : pct(y.rateMin, 2) + '–' + pct(y.rateMax, 2));
       $('schedule-table').innerHTML = '<table><thead><tr><th>Rok</th><th>Okres</th><th>Oproc.</th><th>Raty</th><th>Kapitał</th><th>Odsetki</th><th>Koszty</th><th>Saldo</th><th>Dochód</th><th>Pokrycie</th></tr></thead><tbody>' +
-        ys.map((y) => `<tr class="${y.inLoan && y.income < y.debtService ? 'deficit' : ''}"><td>${y.year}</td><td>${shortMonth(y.from)} – ${shortMonth(y.to)}</td><td>${rate(y)}</td>` +
+        ys.map((y) => `<tr class="${y.inLoan && y.dscr < 1 ? 'deficit' : ''}"><td>${y.year}</td><td>${shortMonth(y.from)} – ${shortMonth(y.to)}</td><td>${rate(y)}</td>` +
           `<td>${zl(y.payments)}</td><td>${zl(y.capital)}</td><td>${zl(y.interest)}</td><td>${zl(y.loanCosts)}</td><td>${zl(y.balance)}</td><td>${zl(y.income)}</td>` +
           `<td class="dscr">${y.debtService > 0 ? num(y.dscr, 2) : '—'}</td></tr>`).join('') +
         `</tbody><tfoot><tr><td>Razem</td><td></td><td></td><td>${zl(sum('payments'))}</td><td>${zl(sum('capital'))}</td><td>${zl(sum('interest'))}</td><td>${zl(sum('loanCosts'))}</td><td></td><td>${zl(sum('income'))}</td><td></td></tr></tfoot></table>`;

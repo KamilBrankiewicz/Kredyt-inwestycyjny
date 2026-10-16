@@ -1,5 +1,14 @@
 # Changelog
 
+## v4 — 2026-10-16
+
+- **Nadwyżka z obecnego gospodarstwa (F13):** pole w sekcji „Obecne gospodarstwo i inne kredyty”, zł/rok.
+  Wchodzi tylko do pokrycia rat: werdykt, wymagany dochód (teraz z kupionej ziemi), brakuje na raty, progi, siatka,
+  symulacja. Gotówka, majątek, zysk vs lokata i zwrot bez zmian.
+- Siatka wrażliwości liczy min. pokrycie z lat zamiast mnożyć je liniowo (przy `farmIncome = 0` ten sam wynik).
+- Nowe pole `farmIncome: 0` — neutralne dla starych scenariuszy.
+- Check: 63 sprawdzenia.
+
 ## v3 — 2026-10-16
 
 - **Wiele kredytów i zobowiązań:** sekcja „Inne kredyty i zobowiązania” w parametrach. Każdy kredyt ma własne

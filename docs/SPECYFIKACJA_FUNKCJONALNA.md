@@ -153,7 +153,7 @@ Do 3 wariantów obok siebie, np. 10 vs 15 lat, raty równe vs malejące, 20 vs 3
 
 Porównanie dwóch dróg: kupić na kredyt albo dzierżawić tę samą ziemię i trzymać wkład własny na lokacie lub w obligacjach. Wynik: majątek po N latach w obu wariantach.
 
-### F13. Obciążenie całego gospodarstwa — V2
+### F13. Obciążenie całego gospodarstwa — v4 (jedno pole: nadwyżka gospodarstwa na raty)
 
 Wejście: obecny dochód gospodarstwa, obecne raty innych kredytów, koszty utrzymania rodziny.
 Wynik: jaka część dochodu idzie na raty po zakupie i czy gospodarstwo pokryje lata deficytowe z F7.

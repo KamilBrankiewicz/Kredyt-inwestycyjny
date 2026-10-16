@@ -17,7 +17,7 @@
 
 - Dopłaty do oprocentowania (kredyty preferencyjne ARiMR).
 - F12 kupno vs dzierżawa (majątek po N latach w obu wariantach).
-- F13 obciążenie całego gospodarstwa (obecny dochód, inne raty, koszty utrzymania).
+- ~~F13 obciążenie całego gospodarstwa~~ — v3: inne raty, v4: nadwyżka gospodarstwa (po kosztach utrzymania) w pokryciu.
 - ~~F14 zły rok w wybranych latach~~ — v2: korekty lat + symulacja zmiennych lat.
 - Symulacja: serie złych lat (korelacja rok do roku), losowanie stóp procentowych.
 - F15 raport PDF do rozmowy z bankiem.

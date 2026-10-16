@@ -40,6 +40,19 @@ częstotliwość, rodzaj rat, karencja, dzień płatności, koszty roczne. Wszys
   Pola `firstInstallment`, `totalCost`, `rrso` itd. w podsumowaniu dotyczą kredytu na ziemię; `loans` i `allCost` — wszystkich.
 - Bez dodatkowych kredytów wynik jest identyczny jak w v2.
 
+## Nadwyżka z obecnego gospodarstwa (`farmIncome`, F13)
+
+`F` = `max(0, farmIncome)` zł/rok — dochód gospodarstwa bez kupowanej ziemi, po kosztach i utrzymaniu rodziny.
+Stała w każdym roku analizy; wchodzi **tylko do obsługi długu**, tak jak istniejące zobowiązania po stronie rat:
+
+- pokrycie roku = `(dochód z ziemi + F) / obsługa`; z niego werdykt, progi, symulacja zmiennych lat,
+- wymagany dochód (z kupionej ziemi) = `max(0, najwyższa obsługa × bufor − F)`; od niego plon progowy,
+- brakuje na raty = suma `max(0, obsługa − dochód − F)`,
+- gotówka, majątek, bilans, NPV, zysk vs lokata i zwrot — bez `F` (gospodarstwo istnieje niezależnie od zakupu),
+- stres dochodu, korekty lat, zmienność w symulacji i oś „dochód” w siatce zmieniają tylko dochód z kupionej ziemi.
+
+`F = 0` (domyślnie) daje wynik identyczny jak w v3.
+
 ## Oś czasu
 
 - `m = 0` — miesiąc zakupu i uruchomienia kredytu (`startMonth`). Wypływ gotówki: wkład + koszty zakupu (+ prowizja, jeśli nie jest kredytowana).
@@ -71,11 +84,11 @@ w danym roku kalendarzowym: `max(0, 1 + korekta/100)`. Susza −50% obniża przy
 | Wskaźnik | Definicja |
 |---|---|
 | Obsługa kredytu w roku | suma rat + koszty kredytu w roku analizy |
-| Pokrycie (DSCR) | dochód w roku / obsługa kredytu w roku (tylko lata kredytu z obsługą > 0) |
+| Pokrycie (DSCR) | (dochód w roku + nadwyżka gospodarstwa) / obsługa kredytu w roku (tylko lata kredytu z obsługą > 0) |
 | Werdykt | `ok`: min. pokrycie ≥ bufor; `warn`: 1 ≤ min. pokrycie < bufor; `bad`: < 1 |
-| Wymagany dochód | najwyższa roczna obsługa kredytu × bufor; też na ha i na miesiąc |
+| Wymagany dochód | z kupionej ziemi: max(0, najwyższa roczna obsługa kredytu × bufor − nadwyżka gospodarstwa); też na ha i na miesiąc |
 | Plon progowy | `(wymagany dochód/ha + koszty − dopłaty + podatek rolny) / cena` (tryb „z plonu”) |
-| Brakuje na raty | suma `obsługa − dochód` w latach, gdy dochód < obsługa |
+| Brakuje na raty | suma `obsługa − dochód − nadwyżka gospodarstwa` w latach, gdy ta różnica > 0 |
 | Zwrot gotówkowy | pierwszy miesiąc `m ≥ 1` w horyzoncie ze skumulowaną gotówką ≥ 0 |
 | Zwrot z wartością ziemi | pierwszy miesiąc w horyzoncie z majątkiem ≥ 0; również bez wzrostu ceny ziemi |
 | Bilans | majątek na koniec horyzontu (bez odsetek od gotówki) |
@@ -119,12 +132,13 @@ Kryterium: min. pokrycie = bufor. Bisekcja (`solve`) na całym silniku, do toler
 
 Brak zmiany znaku na krańcach → `value: null`, `reason: 'always'` (spina się w całym przedziale) albo `'never'`. Nigdy `NaN`.
 
-Siatka: min. pokrycie dla przesunięć stopy −1…+4 pp × zmian dochodu −30…+30%. Pokrycie jest liniowe względem mnożnika dochodu, więc wystarcza jedna symulacja na wiersz.
+Siatka: min. pokrycie dla przesunięć stopy −1…+4 pp × zmian dochodu z kupionej ziemi −30…+30% (nadwyżka gospodarstwa stała). Harmonogram nie zależy od dochodu, więc wystarcza jedna symulacja na wiersz: min. po latach z `(dochód × (1 + zmiana) + F) / obsługa`.
 
 ## Znane uproszczenia (2026-10-13)
 
 - Dochód netto wpływa w całości raz w roku; nie modelujemy kosztów ponoszonych w trakcie sezonu ani kredytu obrotowego.
 - Stres dochodu obniża dochód netto (nie przychód); korekty lat i zmienność w symulacji dotyczą przychodu.
+- Nadwyżka obecnego gospodarstwa jest stała co roku — bez stresu, zmienności i wzrostu (susza na kupionej ziemi jej nie obniża).
 - W symulacji lata są od siebie niezależne (brak serii złych lat), rozkład normalny ucięty na zerze przychodu; raty bez losowania stóp.
 - Gotówka (nadwyżki i braki) nie jest oprocentowana w bilansie; uwzględniają ją NPV i „Zysk vs lokata”.
 - Jedna efektywna stopa alternatywna z Belką naliczaną rocznie.

@@ -31,6 +31,7 @@ const Storage = (() => {
     yearlyLoanCosts: 0,        // ubezpieczenie itp., zł/rok
     rateOverrides: {},         // { 'YYYY-MM': stopa referencyjna } — lepkie
     extraLoans: [],            // inne kredyty i zobowiązania, pola: EXTRA_LOAN_DEFAULTS
+    farmIncome: 0,             // nadwyżka z obecnego gospodarstwa na raty, zł/rok; tylko do pokrycia (F13)
     // Dochód z ziemi
     incomeMode: 'detailed',    // 'simple' | 'detailed'
     netIncomePerHa: 2500,

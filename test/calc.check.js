@@ -243,6 +243,29 @@ check('próg stopy z dwoma kredytami: na progu min. pokrycie = bufor', () => {
   near(Calc.summarize(Calc.simulate(inp, TODAY, { ratePp: t.rateShift.value }), inp).minDscr, inp.dscrTarget, 1e-4, 'pokrycie na progu');
 });
 
+check('nadwyżka gospodarstwa: wchodzi do pokrycia, wymaganego dochodu i braku; gotówka i zysk bez zmian', () => {
+  const F = 60000;
+  const ex = [extra({ purpose: 'existing', amount: 200000, months: 60 })];
+  const base = Calc.calculate(inputs({ extraLoans: ex }), TODAY);
+  const r = Calc.calculate(inputs({ extraLoans: ex, farmIncome: F }), TODAY);
+  const s0 = base.base.summary, s = r.base.summary;
+  const ly = r.base.years.filter((y) => y.inLoan && y.debtService > 0);
+  near(s.minDscr, Math.min(...ly.map((y) => (y.income + F) / y.debtService)), 1e-12, 'min. pokrycie');
+  near(s.requiredIncome, s0.requiredIncome - F, 1e-6, 'wymagany dochód z ziemi');
+  near(s.shortfall, ly.reduce((a, y) => a + Math.max(0, y.debtService - y.income - F), 0), 1e-6, 'brak na raty');
+  near(s.delta, s0.delta, 1e-9, 'zysk vs lokata');
+  near(s.end.cumCash, s0.end.cumCash, 1e-9, 'gotówka');
+  near(r.grid[1].cells[2].dscr, s.minDscr, 1e-12, 'siatka: bieżący punkt');
+  near(r.stressIncome.summary.minDscr, Math.min(...r.stressIncome.years.filter((y) => y.inLoan && y.debtService > 0)
+    .map((y) => (y.income + F) / y.debtService)), 1e-12, 'stres dochodu: nadwyżka stała');
+  const big = Calc.calculate(inputs({ extraLoans: ex, farmIncome: 1e7 }), TODAY);
+  assert.equal(big.base.summary.requiredIncome, 0, 'wymagany dochód nie ujemny');
+  assert.equal(big.mc.share.ok, 1, 'symulacja: wszystko ok');
+  const t = r.thresholds.maxPricePerHa.value;
+  assert.ok(t !== null);
+  near(Calc.summarize(Calc.simulate(inputs({ extraLoans: ex, farmIncome: F, pricePerHa: t }), TODAY), inputs({})).minDscr, DEFAULTS.dscrTarget, 1e-3, 'próg ceny');
+});
+
 check('import: extraLoans musi być tablicą obiektów o dobrych typach', () => {
   const sc = (extraLoans) => ({ version: 1, scenarios: [{ id: 'a', updatedAt: '2026-10-16', name: 'x', inputs: { extraLoans } }] });
   assert.ok(validateImport(sc({})));
