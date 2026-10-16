@@ -52,4 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch((err) => console.error('SW:', err));
+  // Nowa wersja przejęła stronę → przeładuj raz, żeby nie działał stary JS z poprzedniego cache.
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) location.reload(); });
 }

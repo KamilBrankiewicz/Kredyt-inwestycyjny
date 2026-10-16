@@ -1,5 +1,10 @@
 # Changelog
 
+## v9 — 2026-10-16
+
+- **Aktualizacja dociera od razu:** SW instaluje pliki z sieci z pominięciem cache HTTP (wcześniej mógł zapisać stare
+  pliki do nowego cache), a strona przeładowuje się raz, gdy nowa wersja przejmie kontrolę.
+
 ## v8 — 2026-10-16
 
 - **Prostszy dochód z ziemi:** zamiast trybu, uprawy, plonu, ceny skupu, kosztów, dopłat i podatku — dwa pola:

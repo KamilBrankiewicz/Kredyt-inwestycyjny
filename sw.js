@@ -1,5 +1,5 @@
 // Bump CACHE_NAME przy KAŻDEJ zmianie JS/CSS/HTML (razem ze znacznikiem „vN” w index.html).
-const CACHE_NAME = 'kredyt-inwestycyjny-v8';
+const CACHE_NAME = 'kredyt-inwestycyjny-v9';
 const CACHE_PREFIX = 'kredyt-inwestycyjny-';
 const APP_SHELL = [
   './',
@@ -14,7 +14,8 @@ const APP_SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(APP_SHELL)));
+  // cache: 'reload' — z sieci, nie z cache HTTP przeglądarki (GitHub Pages: max-age=600), inaczej nowy cache dostaje stare pliki.
+  event.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(APP_SHELL.map((u) => new Request(u, { cache: 'reload' })))));
   self.skipWaiting();
 });
 
