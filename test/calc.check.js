@@ -37,6 +37,16 @@ check('przychód progowy: zysk przy nim = wymagany dochód/ha', () => {
   near(s.thresholdRevenue - (DEFAULTS.revenuePerHa - DEFAULTS.profitPerHa), s.requiredPerHa, 1e-9, 'próg');
 });
 
+check('inna inwestycja: cena łączna, dochód na rok, powierzchnia pominięta; ujemna zmiana wartości', () => {
+  const sim = Calc.simulate(inputs({ assetType: 'other', areaHa: 20, pricePerHa: 400000, ownContribution: 100000, revenuePerHa: 90000, profitPerHa: 60000, landGrowthPct: -10 }), TODAY);
+  assert.equal(sim.purchase.price, 400000);
+  assert.equal(sim.annualIncome, 60000);
+  near(sim.rows[12].land, 400000 * 0.9, 1e-6, 'wartość po roku');
+  assert.equal(sim.loans[0].name, 'Kredyt główny');
+  const land = Calc.simulate(inputs({ areaHa: 2, pricePerHa: 200000 }), TODAY);
+  assert.equal(land.purchase.price, 400000);
+});
+
 check('PMT 100 000 zł, 6%, 120 mies.', () => near(Calc.pmt(100000, 6, 120), 1110.21, 0.005, 'PMT'));
 check('PMT 500 000 zł, 6%, 300 mies.', () => near(Calc.pmt(500000, 6, 300), 3221.51, 0.005, 'PMT'));
 check('PMT kwartalne 100 000 zł, 6%, 40 rat', () => near(Calc.pmt(100000, 6, 40, 4), 3342.71, 0.005, 'PMT'));

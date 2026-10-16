@@ -70,6 +70,12 @@ Stała w każdym roku analizy; wchodzi **tylko do obsługi długu**, tak jak ist
 7. Przepływ = dochód − rata − koszty kredytu; skumulowana gotówka; wartość ziemi `cena × (1 + wzrost ceny)^(m/12)`.
 8. Majątek = ziemia − saldo − odsetki narosłe + skumulowana gotówka (też w wariancie bez wzrostu ceny ziemi).
 
+## Co kupujesz
+
+`assetType`: `'land'` (domyślnie) — cena = `ha × cena/ha`, dochód = `zysk/ha × ha`; `'other'` (maszyna, budynek…) —
+`areaOf = 1`: `pricePerHa` to cena łączna, `revenuePerHa`/`profitPerHa` to kwoty na rok, `landGrowthPct` = zmiana wartości
+(może być ujemna, np. −10 = utrata 10% rocznie). Reszta modelu bez zmian.
+
 ## Dochód z ha
 
 Dwa pola: przychód z ha `revenuePerHa` (sprzedaż plonu) i zysk z ha `profitPerHa` (po kosztach, z dopłatami,

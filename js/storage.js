@@ -7,7 +7,9 @@ const Storage = (() => {
 
   // Domyślne parametry. Nowe pole = wartość neutralna dla starych scenariuszy (np. koszt 0).
   const DEFAULTS = {
-    // Ziemia
+    // Zakup
+    assetType: 'land',         // 'land' — ziemia (cena i dochód na ha) | 'other' — inna inwestycja (cena łączna, dochód na rok)
+    assetName: '',             // nazwa innej inwestycji, np. „ciągnik”
     areaHa: 20,
     pricePerHa: 60000,
     ownContribution: 300000,

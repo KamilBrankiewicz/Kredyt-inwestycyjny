@@ -82,24 +82,34 @@ const UI = (() => {
   const FREQ = [[1, 'co miesiąc'], [3, 'co kwartał'], [6, 'co pół roku'], [12, 'raz w roku']];
   const FREQ_NAME = { 1: 'miesięczna', 3: 'kwartalna', 6: 'półroczna', 12: 'roczna' };
   const MONTH_OPTS = MONTHS.map((m, i) => [i + 1, cap(m)]);
-  const price = (i) => (+i.areaHa || 0) * (+i.pricePerHa || 0);
+  const price = (i) => Calc.purchase(i).price;
+  // Co kupujemy: ziemia (cena i dochód na ha) albo inna inwestycja (cena łączna, dochód na rok).
+  const isLand = (i) => i.assetType !== 'other';
+  const gen = (i) => (isLand(i) ? 'ziemi' : 'inwestycji');
+  const perHa = (i) => (isLand(i) ? '/ha' : '');       // przy cenie
+  const perUnit = (i) => (isLand(i) ? '/ha' : '/rok'); // przy dochodzie
+  const buyLabel = (i) => (isLand(i) ? `${inputFmt(2).format(i.areaHa)} ha × ${zl(i.pricePerHa)}` : `${i.assetName || 'Inwestycja'} ${zl(i.pricePerHa)}`);
+  const val = (x, i) => (typeof x === 'function' ? x(i) : x);
 
   // Pole: k, label, t ('num' domyślnie | 'sel' | 'chk' | 'month' | 'date'), unit, min, max(i), int, dec,
+  // (label, unit, title sekcji i adv mogą być funkcjami (i) — formularz renderuje się od nowa przy zmianie assetType),
   // optional (puste = 0 albo ''), show(i), hint(i, ctx), placeholder(i). Grupa: { adv: tytuł, fields }.
   const SECTIONS = [
     {
-      title: 'Ziemia', fields: [
-        { k: 'areaHa', label: 'Powierzchnia', unit: 'ha', min: 0.01, max: () => 100000, dec: 2 },
-        { k: 'pricePerHa', label: 'Cena', unit: 'zł/ha', min: 1, max: () => 10000000, hint: (i, c) => 'Łącznie: ' + zl(c.p.price) },
+      title: (i) => (isLand(i) ? 'Ziemia' : 'Zakup'), fields: [
+        { k: 'assetType', t: 'sel', label: 'Co kupujesz', opts: [['land', 'ziemię rolną'], ['other', 'coś innego (maszyna, budynek, sprzęt…)']] },
+        { k: 'assetName', t: 'text', label: 'Nazwa', show: (i) => !isLand(i), optional: true },
+        { k: 'areaHa', label: 'Powierzchnia', unit: 'ha', min: 0.01, max: () => 100000, dec: 2, show: isLand },
+        { k: 'pricePerHa', label: 'Cena', unit: (i) => 'zł' + perHa(i), min: 1, max: () => 100000000, hint: (i, c) => (isLand(i) ? 'Łącznie: ' + zl(c.p.price) : '') },
         {
-          k: 'ownContribution', label: 'Wkład własny', unit: 'zł', min: 0, max: price, maxMsg: 'Wkład nie może przekraczać ceny ziemi.',
+          k: 'ownContribution', label: 'Wkład własny', unit: 'zł', min: 0, max: price, maxMsg: 'Wkład nie może przekraczać ceny.',
           hint: (i, c) => (c.p.price > 0 ? pct(c.p.own / c.p.price * 100, 0) + ' ceny · kredyt: ' + zl(c.p.loan) : ''),
         },
         {
-          k: 'pccExempt', t: 'chk', label: 'Zwolnienie z PCC (np. powiększenie gospodarstwa rodzinnego)',
+          k: 'pccExempt', t: 'chk', label: (i) => (isLand(i) ? 'Zwolnienie z PCC (np. powiększenie gospodarstwa rodzinnego)' : 'Bez PCC (np. zakup od firmy na fakturę VAT)'),
           hint: (i, c) => (i.pccExempt ? 'Bez podatku PCC.' : 'PCC 2%: ' + zl(c.p.pcc) + '. Zaznacz, jeśli przysługuje Ci zwolnienie.'),
         },
-        { k: 'notaryCosts', label: 'Notariusz i wpis do księgi wieczystej', unit: 'zł', min: 0, hint: (i, c) => 'Wszystkie koszty zakupu: ' + zl(c.p.oneOff) },
+        { k: 'notaryCosts', label: (i) => (isLand(i) ? 'Notariusz i wpis do księgi wieczystej' : 'Koszty zakupu (notariusz, transport, rejestracja)'), unit: 'zł', min: 0, hint: (i, c) => 'Wszystkie koszty zakupu: ' + zl(c.p.oneOff) },
         {
           adv: 'Inne koszty zakupu', fields: [
             { k: 'valuationCosts', label: 'Operat szacunkowy (wycena)', unit: 'zł', min: 0, optional: true },
@@ -137,7 +147,7 @@ const UI = (() => {
       title: 'Obecne gospodarstwo i inne kredyty', fields: [
         {
           k: 'farmIncome', label: 'Nadwyżka z obecnego gospodarstwa na raty', unit: 'zł/rok', min: 0, optional: true,
-          hint: () => 'Dochód gospodarstwa bez kupowanej ziemi, po kosztach i utrzymaniu rodziny. Liczy się tylko do pokrycia rat; zysk i zwrot z zakupu liczymy bez niej.',
+          hint: () => 'Dochód gospodarstwa bez tego zakupu, po kosztach i utrzymaniu rodziny. Liczy się tylko do pokrycia rat; zysk i zwrot z zakupu liczymy bez niej.',
         },
         {
           k: 'cashAvailable', label: 'Gotówka, którą masz na zakup i rezerwę', unit: 'zł', min: 0, optional: true,
@@ -147,24 +157,24 @@ const UI = (() => {
       ],
     },
     {
-      title: 'Dochód z kupionej ziemi', fields: [
+      title: (i) => (isLand(i) ? 'Dochód z kupionej ziemi' : 'Dochód z inwestycji'), fields: [
         {
-          k: 'revenuePerHa', label: 'Przychód (dochód brutto) z ha', unit: 'zł/ha', min: 0,
-          hint: () => 'Ze sprzedaży plonu, przed kosztami. Ta część waha się z roku na rok — od niej liczymy odchylenia.',
+          k: 'revenuePerHa', label: (i) => 'Przychód (dochód brutto)' + (isLand(i) ? ' z ha' : ' na rok'), unit: (i) => 'zł' + perUnit(i), min: 0,
+          hint: (i) => (isLand(i) ? 'Ze sprzedaży plonu' : 'Ile ta inwestycja zarabia albo oszczędza') + ', przed kosztami. Ta część waha się z roku na rok — od niej liczymy odchylenia.',
         },
         {
-          k: 'profitPerHa', label: 'Zysk z ha', unit: 'zł/ha', min: -100000,
-          hint: (i) => 'Po kosztach uprawy, z dopłatami, po podatku rolnym, przed ratą kredytu.' +
-            (i.revenuePerHa != null && i.profitPerHa != null ? ' Koszty stałe (przychód − zysk): ' + zl(i.revenuePerHa - i.profitPerHa) + '/ha.' : ''),
+          k: 'profitPerHa', label: (i) => 'Zysk' + (isLand(i) ? ' z ha' : ' na rok'), unit: (i) => 'zł' + perUnit(i), min: -10000000,
+          hint: (i) => (isLand(i) ? 'Po kosztach uprawy, z dopłatami, po podatku rolnym' : 'Po kosztach (paliwo, serwis, ubezpieczenie, podatki)') + ', przed ratą kredytu.' +
+            (i.revenuePerHa != null && i.profitPerHa != null ? ' Koszty stałe (przychód − zysk): ' + zl(i.revenuePerHa - i.profitPerHa) + perUnit(i) + '.' : ''),
         },
         {
           k: 'incomeMonth', t: 'sel', label: 'Miesiąc wpływu dochodu', opts: MONTH_OPTS, numeric: true,
-          hint: (i, c) => 'Zysk: ' + zl(c.perHa * (+i.areaHa || 0)) + '/rok',
+          hint: (i, c) => 'Zysk: ' + zl(c.perHa * Calc.areaOf(i)) + '/rok',
         },
         {
-          adv: 'Wzrost dochodu, dzierżawa', fields: [
+          adv: (i) => (isLand(i) ? 'Wzrost dochodu, dzierżawa' : 'Wzrost dochodu'), fields: [
             { k: 'incomeGrowthPct', label: 'Wzrost dochodu', unit: '%/rok', min: -20, max: () => 20, dec: 2, optional: true },
-            { k: 'rentPerHa', label: 'Czynsz dzierżawny w okolicy (dla porównania)', unit: 'zł/ha', min: 0, optional: true },
+            { k: 'rentPerHa', label: 'Czynsz dzierżawny w okolicy (dla porównania)', unit: 'zł/ha', min: 0, optional: true, show: isLand },
           ],
         },
         {
@@ -186,7 +196,10 @@ const UI = (() => {
           k: 'horizonYears', label: 'Horyzont analizy', unit: 'lat', min: 0, max: () => 50, int: true, optional: true,
           placeholder: (i) => String(i.loanYears ?? ''), hint: () => 'Puste = okres kredytu.',
         },
-        { k: 'landGrowthPct', label: 'Wzrost ceny ziemi', unit: '%/rok', min: -20, max: () => 20, dec: 2, hint: () => '0 = wariant ostrożny.' },
+        {
+          k: 'landGrowthPct', label: (i) => (isLand(i) ? 'Wzrost ceny ziemi' : 'Zmiana wartości'), unit: '%/rok', min: -50, max: () => 20, dec: 2,
+          hint: (i) => (isLand(i) ? '0 = wariant ostrożny.' : 'Ujemna = utrata wartości, np. −10 dla maszyny tracącej 10% rocznie.'),
+        },
         { k: 'alternativeRate', label: 'Stopa alternatywna (lokata, obligacje)', unit: '%', min: 0, max: () => 30, dec: 2, hint: (i) => 'Po podatku Belki: ' + pct((+i.alternativeRate || 0) * 0.81, 2) },
         {
           k: 'dscrTarget', label: 'Bufor bezpieczeństwa', unit: '×', min: 1, max: () => 3, dec: 2,
@@ -212,7 +225,7 @@ const UI = (() => {
     { k: 'name', t: 'text', label: 'Nazwa' },
     {
       k: 'purpose', t: 'sel', label: 'Rodzaj',
-      opts: [['own', 'współfinansuje zakup ziemi'], ['existing', 'istniejące zobowiązanie']],
+      opts: [['own', 'współfinansuje zakup'], ['existing', 'istniejące zobowiązanie']],
       hint: (l) => (own(l)
         ? 'Wypłata zmniejsza gotówkę potrzebną na start; raty, odsetki i saldo wchodzą do wszystkich wyników.'
         : 'Raty wchodzą do pokrycia i wymaganego dochodu; zysk i zwrot z zakupu liczymy bez nich.'),
@@ -224,7 +237,7 @@ const UI = (() => {
     { k: 'rateType', t: 'sel', label: 'Oprocentowanie', opts: [['variable', 'zmienne: stopa referencyjna + marża'], ['fixed', 'stałe (także 0%)']] },
     {
       k: 'margin', label: 'Marża', unit: 'pp', min: 0, max: () => 20, dec: 2, show: variable,
-      hint: (l) => 'Oprocentowanie: ' + pct((+inputs.baseRate || 0) + (+l.margin || 0), 2) + '. Stopa referencyjna i jej zmiany jak w kredycie na ziemię.',
+      hint: (l) => 'Oprocentowanie: ' + pct((+inputs.baseRate || 0) + (+l.margin || 0), 2) + '. Stopa referencyjna i jej zmiany jak w kredycie głównym.',
     },
     { k: 'fixedRate', label: 'Oprocentowanie stałe', unit: '%', min: 0, max: () => 30, dec: 2, show: (l) => !variable(l), hint: () => '0% = bez oprocentowania (np. rozłożona płatność syndykowi). Stres stopy i progi stopy go nie zmieniają.' },
     { k: 'feePct', label: 'Prowizja', unit: '%', min: 0, max: () => 10, dec: 2, show: own, hint: (l) => zl((+l.amount || 0) * (+l.feePct || 0) / 100) + ', płatna z wypłaty' },
@@ -273,7 +286,7 @@ const UI = (() => {
     const data = extra ? `data-el="${n}" data-ek="${f.k}"` : `data-k="${f.k}"`;
     let control;
     if (f.t === 'chk') {
-      return `<div class="field check" data-field="${key}"><label><input type="checkbox" id="${id}" ${data}${src[f.k] ? ' checked' : ''}>${escapeHtml(f.label)}</label><div class="hint"></div></div>`;
+      return `<div class="field check" data-field="${key}"><label><input type="checkbox" id="${id}" ${data}${src[f.k] ? ' checked' : ''}>${escapeHtml(val(f.label, inputs))}</label><div class="hint"></div></div>`;
     }
     if (f.t === 'sel') {
       control = `<select id="${id}" ${data}>${f.opts.map(([v, l]) => `<option value="${escapeHtml(v)}"${String(src[f.k]) === String(v) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`;
@@ -285,8 +298,9 @@ const UI = (() => {
       const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder(inputs))}"` : '';
       control = `<input type="text" inputmode="decimal" id="${id}" ${data} value="${escapeHtml(fieldValue(f, src))}"${ph}>`;
     }
-    return `<div class="field" data-field="${key}"><label for="${id}">${escapeHtml(f.label)}</label>` +
-      `<div class="input-wrap">${control}${f.unit ? `<span class="unit">${escapeHtml(f.unit)}</span>` : ''}</div>` +
+    const unit = val(f.unit, inputs);
+    return `<div class="field" data-field="${key}"><label for="${id}">${escapeHtml(val(f.label, inputs))}</label>` +
+      `<div class="input-wrap">${control}${unit ? `<span class="unit">${escapeHtml(unit)}</span>` : ''}</div>` +
       '<div class="hint"></div><div class="error"></div></div>';
   }
 
@@ -323,9 +337,9 @@ const UI = (() => {
   function renderForm() {
     const CUSTOM = { overrides: renderOverrides, yearIncome: renderYearIncome, extraLoans: renderExtraLoans };
     const item = (g) => (g.custom ? CUSTOM[g.custom]() : renderField(g));
-    const html = SECTIONS.map((s) => `<div class="section"><h2>${escapeHtml(s.title)}</h2>` +
+    const html = SECTIONS.map((s) => `<div class="section"><h2>${escapeHtml(val(s.title, inputs))}</h2>` +
       s.fields.map((f) => (f.adv
-        ? `<details class="adv"><summary>${escapeHtml(f.adv)}</summary>${f.fields.map(item).join('')}</details>`
+        ? `<details class="adv"><summary>${escapeHtml(val(f.adv, inputs))}</summary>${f.fields.map(item).join('')}</details>`
         : item(f))).join('') + '</div>').join('');
     // Zachowaj otwarte sekcje „Zaawansowane” przy ponownym renderze.
     const open = [...document.querySelectorAll('#params-form details.adv')].map((d) => d.open);
@@ -340,7 +354,7 @@ const UI = (() => {
   }
 
   function renderExtraLoans() {
-    return '<div id="extra-loans"><p class="muted small">Każdy kredyt ma własny harmonogram. Raty wszystkich kredytów sumują się w pokryciu, wymaganym dochodzie i werdykcie. Startują razem z kredytem na ziemię.</p>' +
+    return '<div id="extra-loans"><p class="muted small">Każdy kredyt ma własny harmonogram. Raty wszystkich kredytów sumują się w pokryciu, wymaganym dochodzie i werdykcie. Startują razem z kredytem głównym.</p>' +
       inputs.extraLoans.map((l, n) => `<fieldset class="extra-loan" data-el-card="${n}"><legend>${escapeHtml(l.name || 'Kredyt ' + (n + 2))}</legend>` +
         EXTRA_FIELDS.map((f) => renderField(f, n)).join('') +
         `<button type="button" class="btn btn-small btn-danger" data-action="el-remove" data-n="${n}">Usuń ten kredyt</button></fieldset>`).join('') +
@@ -357,8 +371,9 @@ const UI = (() => {
     if (Number.isNaN(v)) return 'To nie jest liczba.';
     if (f.int && !Number.isInteger(v)) return 'Wpisz liczbę całkowitą.';
     const max = f.max ? f.max(ctx) : Infinity;
-    if (f.min !== undefined && v < f.min) return 'Minimum: ' + inputFmt(2).format(f.min) + (f.unit ? ' ' + f.unit : '') + '.';
-    if (v > max) return f.maxMsg || 'Maksimum: ' + inputFmt(2).format(max) + (f.unit ? ' ' + f.unit : '') + '.';
+    const unit = val(f.unit, ctx);
+    if (f.min !== undefined && v < f.min) return 'Minimum: ' + inputFmt(2).format(f.min) + (unit ? ' ' + unit : '') + '.';
+    if (v > max) return f.maxMsg || 'Maksimum: ' + inputFmt(2).format(max) + (unit ? ' ' + unit : '') + '.';
     return null;
   }
 
@@ -482,6 +497,7 @@ const UI = (() => {
   function handleParamInput(e) {
     if (e.target.matches('details, summary')) return;
     readForm();
+    if (e.target.dataset.k === 'assetType') renderForm(); // etykiety i jednostki zależą od rodzaju zakupu
     if (!e.target.dataset.year) refreshYearIncome();
     updateFormState();
     recalc(false);
@@ -593,9 +609,9 @@ const UI = (() => {
 
   function renderSummaryBar() {
     const i = inputs;
-    const income = `zysk ${zl(i.profitPerHa)}/ha`;
+    const income = `zysk ${zl(i.profitPerHa)}${perUnit(i)}`;
     const name = currentId ? (Storage.getScenario(currentId)?.name || '') : '';
-    $('summary-bar').innerHTML = `<span>${name ? '<b>' + escapeHtml(name) + '</b> · ' : ''}${inputFmt(2).format(i.areaHa)} ha × ${zl(i.pricePerHa)} · ${yearsLabel(i.loanYears)} · ${pct(i.baseRate + i.margin, 2)}${i.extraLoans.length ? ' · + ' + i.extraLoans.length + ' ' + plural(i.extraLoans.length, 'kredyt', 'kredyty', 'kredytów') : ''} · ${escapeHtml(income)}</span><span class="edit">Zmień ›</span>`;
+    $('summary-bar').innerHTML = `<span>${name ? '<b>' + escapeHtml(name) + '</b> · ' : ''}${escapeHtml(buyLabel(i))} · ${yearsLabel(i.loanYears)} · ${pct(i.baseRate + i.margin, 2)}${i.extraLoans.length ? ' · + ' + i.extraLoans.length + ' ' + plural(i.extraLoans.length, 'kredyt', 'kredyty', 'kredytów') : ''} · ${escapeHtml(income)}</span><span class="edit">Zmień ›</span>`;
   }
 
   function verdictCause(s) {
@@ -604,7 +620,7 @@ const UI = (() => {
     const k = s.loans.length > 1 ? `wszystkich ${s.loans.length} kredytów` : 'kredytu';
     if (!fin(s.minDscr)) return 'Bez kredytu — nie ma rat do pokrycia.';
     const farm = s.farmIncome > 0;
-    const src = farm ? 'Dochód z ziemi i gospodarstwa' : 'Dochód z ziemi';
+    const src = 'Dochód z ' + gen(inputs) + (farm ? ' i gospodarstwa' : '');
     if (s.status === 'ok') return `${src} pokrywa raty z zapasem: w najgorszym roku ${cov} rocznej obsługi ${k} (wymagane ${tgt}).`;
     if (s.status === 'warn') return `${src} pokrywa raty, ale bez wymaganego zapasu: w najgorszym roku ${cov} obsługi ${k}, a bufor to ${tgt}.`;
     const n = s.deficitYears.length;
@@ -644,7 +660,7 @@ const UI = (() => {
 
   function nextStep(v, s) {
     const t = result.thresholds;
-    if (s.status === 'bad' && t.maxPricePerHa.value !== null) return { text: `Zobacz progi: zakup spina się przy cenie do ${zl(t.maxPricePerHa.value)}/ha`, goto: 'sensitivity' };
+    if (s.status === 'bad' && t.maxPricePerHa.value !== null) return { text: `Zobacz progi: zakup spina się przy cenie do ${zl(t.maxPricePerHa.value)}${perHa(inputs)}`, goto: 'sensitivity' };
     if (s.status === 'bad') return { text: 'Sprawdź w Wrażliwości, co musiałoby się zmienić', goto: 'sensitivity' };
     if (v.status !== 'ok') return { text: 'Zobacz stres test w Wrażliwości', goto: 'sensitivity' };
     return { text: 'Zapisz ten wariant i porównaj z innym', action: 'save' };
@@ -675,21 +691,21 @@ const UI = (() => {
     const allLine = extras
       ? `<br>wszystkie kredyty: ≈ <b>${zl(r.years[0].debtService / 12)}</b>/mies. w 1. roku, najwięcej ${zl(s.maxDebtService / 12)}/mies.` : '';
     const tiles = [
-      `<div class="tile"><div class="tile-label">Rata ${FREQ_NAME[f]}${extras ? ' (kredyt na ziemię)' : ''}</div>` +
+      `<div class="tile"><div class="tile-label">Rata ${FREQ_NAME[f]}${extras ? ' (kredyt główny)' : ''}</div>` +
       `<div class="tile-value">${zl(s.firstInstallment)}</div>` +
       `<div class="tile-sub">${f > 1 ? `≈ <b>${zl(s.firstInstallmentMonthly)}</b> miesięcznie<br>` : ''}najwyższa ${zl(s.maxInstallment)} · przy ${pp(inputs.stressRatePp)}: <b>${zl(sr.maxInstallment)}</b>${graceLine}${allLine}</div></div>`,
 
-      `<div class="tile"><div class="tile-label">Wymagany dochód${s.farmIncome > 0 ? ' z kupionej ziemi' : ''}</div>` +
+      `<div class="tile"><div class="tile-label">Wymagany dochód${s.farmIncome > 0 ? (isLand(inputs) ? ' z kupionej ziemi' : ' z inwestycji') : ''}</div>` +
       `<div class="tile-value">${zl(s.requiredIncome)}<span class="small muted"> /rok</span></div>` +
-      `<div class="tile-sub"><b>${zl(s.requiredPerHa)}/ha</b> · ${zl(s.requiredMonthly)}/mies.` +
-      (s.thresholdRevenue !== null ? `<br>przychód progowy: <b>${zl(s.thresholdRevenue)}/ha</b>` : '') +
-      `<br>zakładasz: ${zl(s.expectedPerHa)}/ha` +
+      `<div class="tile-sub">${isLand(inputs) ? `<b>${zl(s.requiredPerHa)}/ha</b> · ` : ''}${zl(s.requiredMonthly)}/mies.` +
+      (s.thresholdRevenue !== null ? `<br>przychód progowy: <b>${zl(s.thresholdRevenue)}${perUnit(inputs)}</b>` : '') +
+      `<br>zakładasz: ${zl(s.expectedPerHa)}${perUnit(inputs)}` +
       (s.farmIncome > 0 ? `<br>po odjęciu nadwyżki gospodarstwa ${zl(s.farmIncome)}/rok` : '') + '</div></div>',
 
       `<div class="tile"><div class="tile-label">Zwrot</div>` +
       `<div class="tile-value">${paybackText(s.paybackCash, s)}<span class="small muted"> gotówką</span></div>` +
-      `<div class="tile-sub">z wartością ziemi: <b>${paybackText(s.paybackWealth, s)}</b>${paybackWhen(s.paybackWealth, r.rows)}` +
-      (inputs.landGrowthPct !== 0 ? `<br>bez wzrostu ceny ziemi: <b>${paybackText(s.paybackWealth0, s)}</b>` : '') +
+      `<div class="tile-sub">z wartością ${gen(inputs)}: <b>${paybackText(s.paybackWealth, s)}</b>${paybackWhen(s.paybackWealth, r.rows)}` +
+      (inputs.landGrowthPct !== 0 ? `<br>${isLand(inputs) ? 'bez wzrostu ceny ziemi' : 'bez zmiany wartości'}: <b>${paybackText(s.paybackWealth0, s)}</b>` : '') +
       (s.paybackCash ? `<br>gotówka wraca: ${humanMonth(r.rows[s.paybackCash].date)}` : '') + '</div></div>',
     ];
     $('tiles').innerHTML = tiles.join('');
@@ -700,7 +716,7 @@ const UI = (() => {
       `<div class="card chart"><h3>Dochód a raty, rok po roku</h3>${flowChart(r)}</div>` +
       `<div class="card chart"><h3>Gotówka i majątek</h3>${cashChart(r)}</div>` +
       `<div class="card"><h3>Zakup</h3>` +
-      kv('Cena ziemi', zl(p.price)) + kv('Podatek PCC', zl(p.pcc)) +
+      kv(isLand(inputs) ? 'Cena ziemi' : 'Cena', zl(p.price)) + kv('Podatek PCC', zl(p.pcc)) +
       kv('Notariusz, wycena, inne', zl(p.oneOff - p.pcc)) + kv('Wkład własny', zl(p.own)) +
       kv('Prowizja' + (inputs.feeFinanced ? ' (w kredycie)' : ''), zl(p.fee)) + kv('Kwota kredytu', zl(p.loan)) +
       (r.inflow ? kv('Inne kredyty na zakup (po prowizji)', '−' + zl(r.inflow)) : '') +
@@ -711,18 +727,18 @@ const UI = (() => {
         ? kv('Zostaje z Twojej gotówki', `<span class="${s.cashLeft >= 0 ? 'pos' : 'neg'}">${signedZl(s.cashLeft)}</span>`) +
           kv(`… przy ${stressLabel('stressIncome')}`, `<span class="${result.stressIncome.summary.cashLeft >= 0 ? 'pos' : 'neg'}">${signedZl(result.stressIncome.summary.cashLeft)}</span>`)
         : '') +
-      '<p class="muted small">Szczyt: start plus raty do pierwszych żniw i lata, w których dochód nie pokrywa rat (z nadwyżką gospodarstwa i ratami istniejących kredytów).</p></div>' +
-      `<div class="card"><h3>Koszt kredytu${extras ? ' na ziemię' : ''}</h3>` +
+      '<p class="muted small">Szczyt: start plus raty do pierwszego wpływu dochodu i lata, w których dochód nie pokrywa rat (z nadwyżką gospodarstwa i ratami istniejących kredytów).</p></div>' +
+      `<div class="card"><h3>Koszt kredytu${extras ? ' głównego' : ''}</h3>` +
       kv('Odsetki łącznie', zl(s.totalInterest)) + kv('Prowizja', zl(p.fee)) + kv('Ubezpieczenie i inne', zl(s.loanCostsTotal)) +
       kv('Całkowity koszt kredytu', zl(s.totalCost), true) + kv('Suma wszystkich rat', zl(s.totalPaid)) + kv('RRSO', s.rrso === null ? '—' : pct(s.rrso * 100, 2)) + '</div>' +
       (extras ? loansCard(s) : '') +
       `<div class="card"><h3>Opłacalność ${afterYears(H)}</h3>` +
-      kv('Wartość ziemi', zl(s.end.land)) + kv('Kredyt do spłaty', zl(s.end.balance)) +
+      kv('Wartość ' + gen(inputs), zl(s.end.land)) + kv('Kredyt do spłaty', zl(s.end.balance)) +
       kv('Gotówka: wpływy − wydatki', signedZl(s.end.cumCash)) +
       kv('Bilans (bez odsetek od gotówki)', signedZl(s.netGain), true) +
       kv('Zysk vs lokata ' + pct(inputs.alternativeRate, 2), `<span class="${s.delta >= 0 ? 'pos' : 'neg'}">${signedZl(s.delta)}</span>`) +
       kv('NPV (dziś)', signedZl(s.npv)) + kv('IRR (roczna stopa zwrotu)', s.irr === null ? 'nie da się wyznaczyć' : pct(s.irr * 100, 2)) +
-      (s.rent > 0 ? `<p class="muted small">Wydzierżawienie tej ziemi dałoby ok. ${zl(s.rent)}/rok (${zl(inputs.rentPerHa)}/ha); zakładany dochód z uprawy to ${zl(s.expectedIncome)}/rok.</p>` : '') + '</div>';
+      (s.rent > 0 && isLand(inputs) ? `<p class="muted small">Wydzierżawienie tej ziemi dałoby ok. ${zl(s.rent)}/rok (${zl(inputs.rentPerHa)}/ha); zakładany dochód z uprawy to ${zl(s.expectedIncome)}/rok.</p>` : '') + '</div>';
   }
 
   const PURPOSE = { main: 'główny', own: 'na zakup', existing: 'istniejące' };
@@ -743,7 +759,7 @@ const UI = (() => {
     const s = result.base.summary;
     const rate = inputs.baseRate + inputs.margin;
     const priceLine = t.maxPricePerHa.value !== null
-      ? `cena do <b>${zl(t.maxPricePerHa.value)}/ha</b> (wpisana: ${zl(inputs.pricePerHa)})`
+      ? `cena do <b>${zl(t.maxPricePerHa.value)}${perHa(inputs)}</b> (wpisana: ${zl(inputs.pricePerHa)})`
       : t.maxPricePerHa.reason === 'always' ? 'przy każdej rozsądnej cenie' : 'przy żadnej cenie — dochód jest za niski nawet bez kredytu';
     const hasPath = Object.keys(inputs.rateOverrides).length > 0;
     const rateLine = t.rateShift.value !== null
@@ -839,7 +855,7 @@ const UI = (() => {
         { cls: 's-accent', dots: true, values: ys.map((y) => y.income) },
       ],
       xLabel: (i) => ((i + 1) % step === 0 || i === 0 ? String(i + 1) : null),
-    }) + legend([['s-info', 'kapitał', 'bar'], ['s-warning', 'odsetki', 'bar'], ['s-accent', 'dochód z ziemi'], ['s-muted', 'wymagany (z buforem)', 'dash']]) +
+    }) + legend([['s-info', 'kapitał', 'bar'], ['s-warning', 'odsetki', 'bar'], ['s-accent', 'dochód z ' + gen(inputs)], ['s-muted', 'wymagany (z buforem)', 'dash']]) +
       '<p class="muted small">Oś pozioma: kolejne lata kredytu.</p>';
   }
 
@@ -853,10 +869,10 @@ const UI = (() => {
     ];
     if (inputs.landGrowthPct !== 0) lines.push({ cls: 's-accent', dashed: true, values: rows.map((x) => x.equity0) });
     const markers = [];
-    if (s.paybackWealth) markers.push({ i: s.paybackWealth, cls: 's-accent', label: 'zwrot z ziemią' });
+    if (s.paybackWealth) markers.push({ i: s.paybackWealth, cls: 's-accent', label: 'zwrot z wartością' });
     if (s.paybackCash) markers.push({ i: s.paybackCash, cls: 's-info', label: 'zwrot gotówki' });
     return chartSvg({ n: rows.length, lines, markers, xLabel: (i) => (i % step === 0 ? String(i / 12) : null) }) +
-      legend([['s-info', 'gotówka: wpływy − wydatki'], ['s-accent', 'majątek: ziemia − dług + gotówka']].concat(inputs.landGrowthPct !== 0 ? [['s-accent', 'majątek bez wzrostu ceny ziemi', 'dash']] : [])) +
+      legend([['s-info', 'gotówka: wpływy − wydatki'], ['s-accent', `majątek:${isLand(inputs) ? 'ziemia' : 'wartość'} − dług + gotówka`]].concat(inputs.landGrowthPct !== 0 ? [['s-accent', isLand(inputs) ? 'majątek bez wzrostu ceny ziemi' : 'majątek bez zmiany wartości', 'dash']] : [])) +
       '<p class="muted small">Oś pozioma: lata od zakupu. Gotówka zaczyna się od minus wkładu i kosztów zakupu.</p>';
   }
 
@@ -900,7 +916,7 @@ const UI = (() => {
   function mcCard() {
     const mc = result.mc;
     if (!mc) {
-      return '<div class="card"><h3>Zmienne lata</h3><p class="muted small">Symulacja wyłączona. Ustaw zmienność przychodu w parametrach → Dochód z kupionej ziemi → Zmienne lata.</p></div>';
+      return `<div class="card"><h3>Zmienne lata</h3><p class="muted small">Symulacja wyłączona. Ustaw zmienność przychodu w parametrach → ${isLand(inputs) ? 'Dochód z kupionej ziemi' : 'Dochód z inwestycji'} → Zmienne lata.</p></div>`;
     }
     const H = result.base.H / 12;
     const corrections = Object.keys(inputs.incomeYearPct).length;
@@ -913,7 +929,7 @@ const UI = (() => {
       kv('Brakuje na raty łącznie', `mediana ${zl(mc.shortfall.p50)} · w co 10. wariancie ponad ${zl(mc.shortfall.p90)}`) +
       kv('Zysk vs lokata ' + afterYears(H), `<span class="${mc.delta.p50 >= 0 ? 'pos' : 'neg'}">${signedZl(mc.delta.p50)}</span> (od ${signedZl(mc.delta.p10)} do ${signedZl(mc.delta.p90)})`) +
       kv('Gotówka wraca w horyzoncie', share(mc.paybackCashShare) + (mc.paybackCash ? ' · mediana ' + yearOfMonth(mc.paybackCash.p50) : '')) +
-      kv('Zwrot z wartością ziemi', mc.paybackWealth ? `mediana: ${yearOfMonth(mc.paybackWealth.p50)} · w co 10. wariancie: ${yearOfMonth(mc.paybackWealth.p90)} lub później` : 'nie w horyzoncie') +
+      kv('Zwrot z wartością ' + gen(inputs), mc.paybackWealth ? `mediana: ${yearOfMonth(mc.paybackWealth.p50)} · w co 10. wariancie: ${yearOfMonth(mc.paybackWealth.p90)} lub później` : 'nie w horyzoncie') +
       '<p class="muted small">Zakresy „od … do” obejmują 80% wariantów (10. i 90. percentyl).</p>' +
       `<h3>Dochód rok po roku</h3>${mcIncomeChart(mc)}<h3>Gotówka i majątek</h3>${mcCashChart(mc)}</div>`;
   }
@@ -943,7 +959,7 @@ const UI = (() => {
     const extras = r.loans.length > 1;
     if (scheduleMode === 'years') {
       $('schedule-note').textContent = 'Rok liczony od miesiąca zakupu. Pokrycie = dochód / (raty + koszty kredytu).' +
-        (extras ? ' Raty, kapitał, odsetki, koszty i saldo: wszystkie kredyty razem; oprocentowanie: kredyt na ziemię.' : '');
+        (extras ? ' Raty, kapitał, odsetki, koszty i saldo: wszystkie kredyty razem; oprocentowanie: kredyt główny.' : '');
       const ys = r.years;
       const sum = (k) => ys.reduce((s, y) => s + y[k], 0);
       const rate = (y) => (y.rateMin === y.rateMax ? pct(y.rateMin, 2) : pct(y.rateMin, 2) + '–' + pct(y.rateMax, 2));
@@ -1015,7 +1031,7 @@ const UI = (() => {
       (inputs.cashAvailable > 0 ? row('Zostaje z Twojej gotówki', (s) => `<span class="${s.cashLeft >= 0 ? 'pos' : 'neg'}">${signedZl(s.cashLeft)}</span>`) : '') +
       row('Zysk vs lokata', (s) => `<span class="${s.delta >= 0 ? 'pos' : 'neg'}">${signedZl(s.delta)}</span>`) +
       row('Zwrot gotówkowy', (s) => paybackText(s.paybackCash, s)) +
-      row('Zwrot z ziemią', (s) => paybackText(s.paybackWealth, s)) +
+      row('Zwrot z wartością', (s) => paybackText(s.paybackWealth, s)) +
       '</tbody></table></div>';
 
     const target = result.base.summary.target;
@@ -1054,7 +1070,7 @@ const UI = (() => {
       return `<div class="card scenario${sc.id === currentId ? ' current' : ''}">` +
         `<input type="checkbox" data-compare="${sc.id}"${compareIds.has(sc.id) ? ' checked' : ''} aria-label="Porównaj">` +
         `<div><div class="scenario-name">${escapeHtml(sc.name)}</div>` +
-        `<div class="scenario-meta">${inputFmt(2).format(i.areaHa)} ha × ${zl(i.pricePerHa)} · ${yearsLabel(i.loanYears)} · zapisany ${dateLabel(sc.updatedAt.slice(0, 10))}</div>` +
+        `<div class="scenario-meta">${escapeHtml(buyLabel(i))} · ${yearsLabel(i.loanYears)} · zapisany ${dateLabel(sc.updatedAt.slice(0, 10))}</div>` +
         `<div class="small">${badge(s.status)} ${STATUS[s.status].label} · rata ${zl(s.firstInstallment)} · wymagany ${zl(s.requiredIncome)}/rok · vs lokata <span class="${s.delta >= 0 ? 'pos' : 'neg'}">${signedZl(s.delta)}</span></div>` +
         (sc.notes ? `<div class="scenario-meta">${escapeHtml(sc.notes)}</div>` : '') + '</div>' +
         `<div class="scenario-actions"><button type="button" class="btn btn-small" data-load="${sc.id}">Wczytaj</button><button type="button" class="btn btn-small btn-danger" data-delete="${sc.id}">Usuń</button></div></div>`;
@@ -1069,21 +1085,20 @@ const UI = (() => {
     const row = (label, fn) => `<tr><td>${label}</td>${data.map((d) => `<td>${fn(d)}</td>`).join('')}</tr>`;
     $('compare').innerHTML = '<div class="card"><h3>Porównanie</h3><div class="table-scroll"><table><thead><tr><th></th>' +
       data.map((d) => `<th>${escapeHtml(d.sc.name)}</th>`).join('') + '</tr></thead><tbody>' +
-      row('Powierzchnia', (d) => inputFmt(2).format(d.i.areaHa) + ' ha') +
-      row('Cena', (d) => zl(d.i.pricePerHa) + '/ha') +
+      row('Zakup', (d) => escapeHtml(buyLabel(d.i))) +
       row('Wkład własny', (d) => zl(d.i.ownContribution)) +
       row('Okres', (d) => yearsLabel(d.i.loanYears)) +
       row('Raty', (d) => (d.i.installmentType === 'annuity' ? 'równe' : 'malejące') + ', ' + FREQ.find((x) => x[0] === d.i.frequency)[1]) +
       row('Oprocentowanie', (d) => pct(d.i.baseRate + d.i.margin, 2)) +
       row('Inne kredyty', (d) => (d.i.extraLoans.length ? d.i.extraLoans.length + ' · ' + zl(d.i.extraLoans.reduce((s, l) => s + l.amount, 0)) : '—')) +
-      row('Dochód netto', (d) => zl(d.s.expectedPerHa) + '/ha') +
+      row('Zysk', (d) => zl(d.s.expectedPerHa) + perUnit(d.i)) +
       row('Werdykt', (d) => `${badge(d.s.status)} ${STATUS[d.s.status].label}`) +
       row('Pierwsza rata', (d) => zl(d.s.firstInstallment)) +
       row('Wymagany dochód', (d) => zl(d.s.requiredIncome) + '/rok') +
       row('Min. pokrycie', (d) => (fin(d.s.minDscr) ? num(d.s.minDscr, 2) : '—')) +
       row('Koszt kredytu', (d) => zl(d.s.totalCost)) +
       row('Zwrot gotówkowy', (d) => paybackText(d.s.paybackCash, d.s)) +
-      row('Zwrot z ziemią', (d) => paybackText(d.s.paybackWealth, d.s)) +
+      row('Zwrot z wartością', (d) => paybackText(d.s.paybackWealth, d.s)) +
       row('Zysk vs lokata', (d) => `<span class="${d.s.delta >= 0 ? 'pos' : 'neg'}">${signedZl(d.s.delta)}</span>`) +
       '</tbody></table></div></div>';
   }
@@ -1121,7 +1136,7 @@ const UI = (() => {
   function openSaveModal() {
     if (hasErrors()) { openParams(); showToast('Popraw zaznaczone pola przed zapisem.'); return; }
     const cur = currentId ? Storage.getScenario(currentId) : null;
-    $('save-name').value = cur ? cur.name : `${inputFmt(2).format(inputs.areaHa)} ha × ${zl(inputs.pricePerHa)}, ${yearsLabel(inputs.loanYears)}`;
+    $('save-name').value = cur ? cur.name : `${buyLabel(inputs)}, ${yearsLabel(inputs.loanYears)}`;
     $('save-notes').value = cur ? cur.notes || '' : '';
     $('btn-save-overwrite').hidden = !cur;
     if (cur) $('btn-save-overwrite').textContent = 'Nadpisz „' + cur.name + '”';

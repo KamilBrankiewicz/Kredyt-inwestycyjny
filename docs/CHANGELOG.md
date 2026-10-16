@@ -1,5 +1,12 @@
 # Changelog
 
+## v11 — 2026-10-16
+
+- **Co kupujesz:** ziemia albo coś innego (maszyna, budynek, sprzęt). Przy innej inwestycji: nazwa, cena łączna,
+  przychód i zysk na rok, zmiana wartości (ujemna = utrata wartości), bez powierzchni i dzierżawy; teksty wyników
+  bez „ziemi”. Nowe pola `assetType: 'land'`, `assetName: ''` — stare scenariusze bez zmian.
+- Check: 70 sprawdzeń.
+
 ## v10 — 2026-10-16
 
 - **Wyczyść formularz** na górze parametrów: pusty formularz (jak przy pierwszym uruchomieniu), zapisane scenariusze

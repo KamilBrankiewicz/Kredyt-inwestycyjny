@@ -76,9 +76,11 @@ const Calc = (() => {
   // ---- wielkości pochodne od parametrów ----
 
   const incomePerHa = (inp) => num(inp.profitPerHa);
+  // Inna inwestycja niż ziemia: jedna „jednostka” — cena łączna, dochód na rok (pola *PerHa liczone na całość).
+  const areaOf = (inp) => (inp.assetType === 'other' ? 1 : num(inp.areaHa));
 
   function purchase(inp) {
-    const price = num(inp.areaHa) * num(inp.pricePerHa);
+    const price = areaOf(inp) * num(inp.pricePerHa);
     const own = clamp(num(inp.ownContribution), 0, price);
     const pcc = inp.pccExempt ? 0 : price * PCC;
     const oneOff = num(inp.notaryCosts) + num(inp.valuationCosts) + num(inp.otherCosts) + pcc;
@@ -96,7 +98,7 @@ const Calc = (() => {
     const freq = freqOf(inp.frequency);
     const N = clamp(Math.round(num(inp.loanYears, 1)), 1, 40) * 12;
     return {
-      name: 'Kredyt na ziemię', purpose: 'main', amount: p.loan, net: p.price - p.own, fee: p.fee, N, freq,
+      name: inp.assetType === 'other' ? 'Kredyt główny' : 'Kredyt na ziemię', purpose: 'main', amount: p.loan, net: p.price - p.own, fee: p.fee, N, freq,
       grace: clamp(Math.round(num(inp.graceMonths)), 0, N - freq), graceType: inp.graceType,
       installmentType: inp.installmentType, day: clamp(Math.round(num(inp.paymentDay, 10)), 1, 28),
       fixed: false, margin: num(inp.margin), yearlyCosts: num(inp.yearlyLoanCosts),
@@ -186,7 +188,7 @@ const Calc = (() => {
     // Wypłata kredytów współfinansujących zakup wpływa do gotówki w miesiącu zakupu.
     const inflow = loans.reduce((s, l) => s + (l.purpose === 'own' ? l.net : 0), 0);
 
-    const annualIncome = incomePerHa(inp) * num(inp.areaHa) * incomeFactor;
+    const annualIncome = incomePerHa(inp) * areaOf(inp) * incomeFactor;
     // Zysk z ha = część zmienna (przychód) + część stała (zysk − przychód: koszty, dopłaty, podatek).
     // Korekty roczne i zmienność w symulacji dotyczą części zmiennej.
     const revPerHa = num(inp.revenuePerHa);
@@ -227,7 +229,7 @@ const Calc = (() => {
       if ((idx % 12) + 1 === incomeMonth) {
         const year = Math.floor(idx / 12);
         const yearFactor = Math.max(0, 1 + num(yearPct[year]) / 100);
-        const scale = num(inp.areaHa) * Math.pow(1 + incomeGrowth, harvests.length) * incomeFactor;
+        const scale = areaOf(inp) * Math.pow(1 + incomeGrowth, harvests.length) * incomeFactor;
         income = (revPerHa * yearFactor + fixedPerHa) * scale;
         harvests.push({ m, year, yearFactor, scale, income });
       }
@@ -305,7 +307,7 @@ const Calc = (() => {
     // Wymagany dochód z kupionej ziemi: (dochód + nadwyżka gospodarstwa) / obsługa ≥ bufor w każdym roku.
     const farmIncome = Math.max(0, num(inp.farmIncome));
     const requiredIncome = Math.max(0, maxDebtService * target - farmIncome);
-    const area = num(inp.areaHa);
+    const area = areaOf(inp);
     const requiredPerHa = area > 0 ? requiredIncome / area : null;
     // Przychód z ha, przy którym zysk = wymagany (koszty stałe bez zmian).
     const thresholdRevenue = requiredPerHa !== null ? requiredPerHa + num(inp.revenuePerHa) - num(inp.profitPerHa) : null;
@@ -419,7 +421,7 @@ const Calc = (() => {
     const loShift = -(maxBase + Math.max(...margins));
     const rateShift = result(solve(fRate, loShift, 30, 1e-3), fRate(30) >= 0);
 
-    const area = num(inp.areaHa);
+    const area = areaOf(inp);
     const loPrice = area > 0 ? num(inp.ownContribution) / area + 1 : 1;
     const hiPrice = Math.max(num(inp.pricePerHa) * 10, loPrice * 2);
     const fPrice = (x) => crit({}, { pricePerHa: x });
@@ -575,7 +577,7 @@ const Calc = (() => {
     };
   }
 
-  return { calculate, verdict, simulate, summarize, monteCarlo, pmt, interest, npv, irr, solve, annualize, incomePerHa, purchase, monthIndex, monthKey };
+  return { calculate, verdict, simulate, summarize, monteCarlo, pmt, interest, npv, irr, solve, annualize, incomePerHa, areaOf, purchase, monthIndex, monthKey };
 })();
 if (typeof window === 'object') window.Calc = Calc;
 if (typeof module === 'object') module.exports = Calc; // Node: test/calc.check.js
