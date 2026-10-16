@@ -30,6 +30,7 @@ const Storage = (() => {
     graceType: 'interest',     // 'interest' | 'capitalize'
     yearlyLoanCosts: 0,        // ubezpieczenie itp., zł/rok
     rateOverrides: {},         // { 'YYYY-MM': stopa referencyjna } — lepkie
+    extraLoans: [],            // inne kredyty i zobowiązania, pola: EXTRA_LOAN_DEFAULTS
     // Dochód z ziemi
     incomeMode: 'detailed',    // 'simple' | 'detailed'
     netIncomePerHa: 2500,
@@ -53,6 +54,24 @@ const Storage = (() => {
     stressRateFrom: '',        // YYYY-MM; puste = od początku
     stressRatePp: 2,
     stressIncomePct: 20,
+  };
+
+  // Dodatkowy kredyt (element extraLoans). Startuje razem z kredytem na ziemię.
+  const EXTRA_LOAN_DEFAULTS = {
+    name: 'Kredyt 2',
+    purpose: 'own',            // 'own' — współfinansuje zakup | 'existing' — istniejące zobowiązanie
+    amount: 100000,            // kwota albo saldo do spłaty
+    months: 120,               // okres albo pozostały okres
+    frequency: 1,
+    installmentType: 'annuity',
+    rateType: 'variable',      // 'variable' — stopa referencyjna kredytu na ziemię + marża | 'fixed'
+    margin: 2.5,
+    fixedRate: 2,
+    feePct: 0,                 // tylko 'own'; płatna z wypłaty
+    graceMonths: 0,
+    graceType: 'interest',
+    paymentDay: 10,
+    yearlyCosts: 0,
   };
 
   let onError = (msg) => console.error(msg);
@@ -83,7 +102,12 @@ const Storage = (() => {
 
   function withDefaults(inputs) {
     const src = inputs && typeof inputs === 'object' ? inputs : {};
-    return { ...DEFAULTS, ...src, rateOverrides: { ...(src.rateOverrides || {}) }, incomeYearPct: { ...(src.incomeYearPct || {}) } };
+    return {
+      ...DEFAULTS, ...src,
+      rateOverrides: { ...(src.rateOverrides || {}) },
+      incomeYearPct: { ...(src.incomeYearPct || {}) },
+      extraLoans: Array.isArray(src.extraLoans) ? src.extraLoans.map((l) => ({ ...EXTRA_LOAN_DEFAULTS, ...l })) : [],
+    };
   }
 
   // ---- szkic formularza ----
@@ -169,6 +193,14 @@ const Storage = (() => {
       for (const [k, v] of Object.entries(s.inputs)) {
         if (k in DEFAULTS && typeof v !== typeof DEFAULTS[k]) return 'Pole „' + k + '” w scenariuszu „' + s.name + '” ma zły typ.';
       }
+      const extra = s.inputs.extraLoans;
+      if (extra !== undefined && !Array.isArray(extra)) return 'Pole „extraLoans” w scenariuszu „' + s.name + '” ma zły typ.';
+      for (const l of extra || []) {
+        if (!l || typeof l !== 'object') return 'Kredyt w scenariuszu „' + s.name + '” jest niekompletny.';
+        for (const [k, v] of Object.entries(l)) {
+          if (k in EXTRA_LOAN_DEFAULTS && typeof v !== typeof EXTRA_LOAN_DEFAULTS[k]) return 'Pole „' + k + '” kredytu w scenariuszu „' + s.name + '” ma zły typ.';
+        }
+      }
     }
     return null;
   }
@@ -196,7 +228,7 @@ const Storage = (() => {
   function setTheme(t) { return write(KEYS.theme, t); }
 
   return {
-    DEFAULTS, withDefaults, setErrorHandler,
+    DEFAULTS, EXTRA_LOAN_DEFAULTS, withDefaults, setErrorHandler,
     getDraft, saveDraft,
     getScenarios, getScenario, saveScenario, deleteScenario, restoreScenario,
     mergeListBy, exportData, importData, validateImport, migrate, clearAll,

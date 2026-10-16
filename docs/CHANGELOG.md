@@ -1,5 +1,16 @@
 # Changelog
 
+## v3 — 2026-10-16
+
+- **Wiele kredytów i zobowiązań:** sekcja „Inne kredyty i zobowiązania” w parametrach. Każdy kredyt ma własne
+  parametry (kwota, okres w miesiącach, częstotliwość, rodzaj rat, oprocentowanie zmienne z marżą albo stałe,
+  prowizja, karencja, dzień płatności, koszty) i własny harmonogram. Rodzaj: *na zakup* (wypłata zmniejsza gotówkę
+  na start, wchodzi do wszystkich wyników) albo *istniejące zobowiązanie* (tylko do pokrycia rat).
+- Jeden wynik: raty wszystkich kredytów sumują się w obsłudze długu, pokryciu, werdykcie, wymaganym dochodzie,
+  progach, siatce i symulacji. Karta „Wszystkie kredyty” z kosztem i RRSO każdego; harmonogram rat z wyborem kredytu.
+- Nowe pole `extraLoans: []` — neutralne dla starych scenariuszy (wynik bez zmian, sprawdzone bit w bit względem v2).
+- Check: 62 sprawdzenia.
+
 ## v2 — 2026-10-13
 
 - **Dochód rok po roku:** korekta przychodu w % dla żniw w danym roku kalendarzowym (np. susza −40%). Wchodzi do

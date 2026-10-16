@@ -6,6 +6,7 @@ const UI = (() => {
   let currentId = null;  // wczytany scenariusz
   let view = 'result';
   let scheduleMode = 'years';
+  let scheduleLoan = 0;  // indeks kredytu w widoku rat
   let recalcTimer = null;
   let toastTimer = null;
   const compareIds = new Set();
@@ -138,6 +139,7 @@ const UI = (() => {
         },
       ],
     },
+    { title: 'Inne kredyty i zobowiązania', fields: [{ custom: 'extraLoans' }] },
     {
       title: 'Dochód z kupionej ziemi', fields: [
         { k: 'incomeMode', t: 'sel', label: 'Jak podać dochód', opts: [['detailed', 'z plonu i ceny'], ['simple', 'jedną kwotą na ha']] },
@@ -194,7 +196,40 @@ const UI = (() => {
     },
   ];
   const FIELDS = [];
-  SECTIONS.forEach((s) => s.fields.forEach((f) => (f.adv ? f.fields.forEach((g) => g.k && FIELDS.push(g)) : FIELDS.push(f))));
+  SECTIONS.forEach((s) => s.fields.forEach((f) => (f.adv ? f.fields.forEach((g) => g.k && FIELDS.push(g)) : f.k && FIELDS.push(f))));
+
+  // Pola jednego dodatkowego kredytu (element inputs.extraLoans). Funkcje dostają ten kredyt.
+  const own = (l) => l.purpose !== 'existing';
+  const variable = (l) => l.rateType !== 'fixed';
+  const EXTRA_FIELDS = [
+    { k: 'name', t: 'text', label: 'Nazwa' },
+    {
+      k: 'purpose', t: 'sel', label: 'Rodzaj',
+      opts: [['own', 'współfinansuje zakup ziemi'], ['existing', 'istniejące zobowiązanie']],
+      hint: (l) => (own(l)
+        ? 'Wypłata zmniejsza gotówkę potrzebną na start; raty, odsetki i saldo wchodzą do wszystkich wyników.'
+        : 'Raty wchodzą do pokrycia i wymaganego dochodu; zysk i zwrot z zakupu liczymy bez nich.'),
+    },
+    { k: 'amount', label: 'Kwota (przy istniejącym: saldo do spłaty)', unit: 'zł', min: 0, max: () => 100000000 },
+    { k: 'months', label: 'Okres (przy istniejącym: pozostały)', unit: 'mies.', min: 1, max: () => 480, int: true, hint: (l) => formatMonths(+l.months || 0) },
+    { k: 'frequency', t: 'sel', label: 'Raty płatne', opts: FREQ, numeric: true },
+    { k: 'installmentType', t: 'sel', label: 'Rodzaj rat', opts: [['annuity', 'równe'], ['decreasing', 'malejące']] },
+    { k: 'rateType', t: 'sel', label: 'Oprocentowanie', opts: [['variable', 'zmienne: stopa referencyjna + marża'], ['fixed', 'stałe']] },
+    {
+      k: 'margin', label: 'Marża', unit: 'pp', min: 0, max: () => 20, dec: 2, show: variable,
+      hint: (l) => 'Oprocentowanie: ' + pct((+inputs.baseRate || 0) + (+l.margin || 0), 2) + '. Stopa referencyjna i jej zmiany jak w kredycie na ziemię.',
+    },
+    { k: 'fixedRate', label: 'Oprocentowanie stałe', unit: '%', min: 0, max: () => 30, dec: 2, show: (l) => !variable(l), hint: () => 'Stres stopy i progi stopy go nie zmieniają.' },
+    { k: 'feePct', label: 'Prowizja', unit: '%', min: 0, max: () => 10, dec: 2, show: own, hint: (l) => zl((+l.amount || 0) * (+l.feePct || 0) / 100) + ', płatna z wypłaty' },
+    {
+      k: 'graceMonths', label: 'Karencja w spłacie kapitału', unit: 'mies.', min: 0, int: true,
+      max: (l) => (+l.months || 1) - (+l.frequency || 1), maxMsg: 'Karencja musi być krótsza niż okres kredytu.',
+    },
+    { k: 'graceType', t: 'sel', label: 'W karencji', opts: [['interest', 'płacę same odsetki'], ['capitalize', 'odsetki doliczane do salda']], show: (l) => +l.graceMonths > 0 },
+    { k: 'paymentDay', label: 'Dzień płatności raty', min: 1, max: () => 28, int: true },
+    { k: 'yearlyCosts', label: 'Ubezpieczenie i inne koszty', unit: 'zł/rok', min: 0 },
+  ];
+  const elKey = (n, k) => 'el' + n + '-' + k;
 
   function nextMonth(today) {
     const y = +today.slice(0, 4), m = +today.slice(5, 7);
@@ -215,28 +250,35 @@ const UI = (() => {
 
   // ---------------------------------------------------------------- formularz: render i odczyt
 
-  function fieldValue(f) {
-    const v = inputs[f.k];
-    if (f.t === 'month' || f.t === 'date') return v || '';
+  function fieldValue(f, src = inputs) {
+    const v = src[f.k];
+    if (f.t === 'month' || f.t === 'date' || f.t === 'text') return v || '';
     if (f.optional && !v) return '';
     return inputFmt(f.dec || 0).format(v);
   }
 
-  function renderField(f) {
-    const id = 'f-' + f.k;
+  // n podane → pole n-tego dodatkowego kredytu (EXTRA_FIELDS).
+  function renderField(f, n) {
+    const extra = n !== undefined;
+    const src = extra ? inputs.extraLoans[n] : inputs;
+    const key = extra ? elKey(n, f.k) : f.k;
+    const id = 'f-' + key;
+    const data = extra ? `data-el="${n}" data-ek="${f.k}"` : `data-k="${f.k}"`;
     let control;
     if (f.t === 'chk') {
-      return `<div class="field check" data-field="${f.k}"><label><input type="checkbox" id="${id}" data-k="${f.k}"${inputs[f.k] ? ' checked' : ''}>${escapeHtml(f.label)}</label><div class="hint"></div></div>`;
+      return `<div class="field check" data-field="${key}"><label><input type="checkbox" id="${id}" ${data}${src[f.k] ? ' checked' : ''}>${escapeHtml(f.label)}</label><div class="hint"></div></div>`;
     }
     if (f.t === 'sel') {
-      control = `<select id="${id}" data-k="${f.k}">${f.opts.map(([v, l]) => `<option value="${escapeHtml(v)}"${String(inputs[f.k]) === String(v) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`;
+      control = `<select id="${id}" ${data}>${f.opts.map(([v, l]) => `<option value="${escapeHtml(v)}"${String(src[f.k]) === String(v) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`;
     } else if (f.t === 'month' || f.t === 'date') {
-      control = `<input type="${f.t}" id="${id}" data-k="${f.k}" value="${escapeHtml(fieldValue(f))}">`;
+      control = `<input type="${f.t}" id="${id}" ${data} value="${escapeHtml(fieldValue(f, src))}">`;
+    } else if (f.t === 'text') {
+      control = `<input type="text" id="${id}" ${data} maxlength="60" value="${escapeHtml(fieldValue(f, src))}">`;
     } else {
       const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder(inputs))}"` : '';
-      control = `<input type="text" inputmode="decimal" id="${id}" data-k="${f.k}" value="${escapeHtml(fieldValue(f))}"${ph}>`;
+      control = `<input type="text" inputmode="decimal" id="${id}" ${data} value="${escapeHtml(fieldValue(f, src))}"${ph}>`;
     }
-    return `<div class="field" data-field="${f.k}"><label for="${id}">${escapeHtml(f.label)}</label>` +
+    return `<div class="field" data-field="${key}"><label for="${id}">${escapeHtml(f.label)}</label>` +
       `<div class="input-wrap">${control}${f.unit ? `<span class="unit">${escapeHtml(f.unit)}</span>` : ''}</div>` +
       '<div class="hint"></div><div class="error"></div></div>';
   }
@@ -272,10 +314,12 @@ const UI = (() => {
   }
 
   function renderForm() {
+    const CUSTOM = { overrides: renderOverrides, yearIncome: renderYearIncome, extraLoans: renderExtraLoans };
+    const item = (g) => (g.custom ? CUSTOM[g.custom]() : renderField(g));
     const html = SECTIONS.map((s) => `<div class="section"><h2>${escapeHtml(s.title)}</h2>` +
       s.fields.map((f) => (f.adv
-        ? `<details class="adv"><summary>${escapeHtml(f.adv)}</summary>${f.fields.map((g) => (g.custom === 'overrides' ? renderOverrides() : g.custom === 'yearIncome' ? renderYearIncome() : renderField(g))).join('')}</details>`
-        : renderField(f))).join('') + '</div>').join('');
+        ? `<details class="adv"><summary>${escapeHtml(f.adv)}</summary>${f.fields.map(item).join('')}</details>`
+        : item(f))).join('') + '</div>').join('');
     // Zachowaj otwarte sekcje „Zaawansowane” przy ponownym renderze.
     const open = [...document.querySelectorAll('#params-form details.adv')].map((d) => d.open);
     $('params-form').innerHTML = html;
@@ -288,16 +332,40 @@ const UI = (() => {
     if (el) el.outerHTML = renderOverrides();
   }
 
+  function renderExtraLoans() {
+    return '<div id="extra-loans"><p class="muted small">Każdy kredyt ma własny harmonogram. Raty wszystkich kredytów sumują się w pokryciu, wymaganym dochodzie i werdykcie. Startują razem z kredytem na ziemię.</p>' +
+      inputs.extraLoans.map((l, n) => `<fieldset class="extra-loan" data-el-card="${n}"><legend>${escapeHtml(l.name || 'Kredyt ' + (n + 2))}</legend>` +
+        EXTRA_FIELDS.map((f) => renderField(f, n)).join('') +
+        `<button type="button" class="btn btn-small btn-danger" data-action="el-remove" data-n="${n}">Usuń ten kredyt</button></fieldset>`).join('') +
+      '<button type="button" class="btn btn-small" data-action="el-add">+ Dodaj kredyt lub zobowiązanie</button></div>';
+  }
+  function rerenderExtraLoans() {
+    const el = $('extra-loans');
+    if (el) el.outerHTML = renderExtraLoans();
+  }
+
+  // Komunikat błędu pola liczbowego albo null. v: wynik parsePlnNumber (null = puste).
+  function numError(f, v, ctx) {
+    if (v === null) return f.optional ? null : 'Wpisz wartość.';
+    if (Number.isNaN(v)) return 'To nie jest liczba.';
+    if (f.int && !Number.isInteger(v)) return 'Wpisz liczbę całkowitą.';
+    const max = f.max ? f.max(ctx) : Infinity;
+    if (f.min !== undefined && v < f.min) return 'Minimum: ' + inputFmt(2).format(f.min) + (f.unit ? ' ' + f.unit : '') + '.';
+    if (v > max) return f.maxMsg || 'Maksimum: ' + inputFmt(2).format(max) + (f.unit ? ' ' + f.unit : '') + '.';
+    return null;
+  }
+
+  const readControl = (f, el) => (f.t === 'chk' ? el.checked
+    : f.t === 'sel' ? (f.numeric ? Number(el.value) : el.value)
+      : f.t === 'month' || f.t === 'date' || f.t === 'text' ? el.value
+        : parsePlnNumber(el.value));
+
   // Czyta wszystkie pola z DOM, waliduje, aktualizuje `inputs` (tylko poprawne wartości) i `errors`.
   function readForm() {
     const cand = {};
     FIELDS.forEach((f) => {
       const el = $('f-' + f.k);
-      if (!el) return;
-      if (f.t === 'chk') cand[f.k] = el.checked;
-      else if (f.t === 'sel') cand[f.k] = f.numeric ? Number(el.value) : el.value;
-      else if (f.t === 'month' || f.t === 'date') cand[f.k] = el.value;
-      else cand[f.k] = parsePlnNumber(el.value);
+      if (el) cand[f.k] = readControl(f, el);
     });
     const merged = { ...inputs, ...cand };
     const errs = {};
@@ -306,14 +374,26 @@ const UI = (() => {
       const v = cand[f.k];
       if (f.t === 'month') { if (!v && !f.optional) errs[f.k] = 'Wybierz miesiąc.'; return; }
       if (f.t !== undefined && f.t !== 'num') return;
-      if (v === null) { if (f.optional) cand[f.k] = 0; else errs[f.k] = 'Wpisz wartość.'; return; }
-      if (Number.isNaN(v)) { errs[f.k] = 'To nie jest liczba.'; return; }
-      if (f.int && !Number.isInteger(v)) { errs[f.k] = 'Wpisz liczbę całkowitą.'; return; }
-      const max = f.max ? f.max(merged) : Infinity;
-      if (f.min !== undefined && v < f.min) errs[f.k] = 'Minimum: ' + inputFmt(2).format(f.min) + (f.unit ? ' ' + f.unit : '') + '.';
-      else if (v > max) errs[f.k] = f.maxMsg || 'Maksimum: ' + inputFmt(2).format(max) + (f.unit ? ' ' + f.unit : '') + '.';
+      if (v === null && f.optional) { cand[f.k] = 0; return; }
+      const e = numError(f, v, merged);
+      if (e) errs[f.k] = e;
     });
     Object.keys(errs).forEach((k) => delete cand[k]);
+
+    // Dodatkowe kredyty: błędne pole zachowuje ostatnią poprawną wartość.
+    if ($('extra-loans')) {
+      cand.extraLoans = inputs.extraLoans.map((prev, n) => {
+        const lc = {};
+        EXTRA_FIELDS.forEach((f) => { const el = $('f-' + elKey(n, f.k)); if (el) lc[f.k] = readControl(f, el); });
+        const lm = { ...prev, ...lc };
+        EXTRA_FIELDS.forEach((f) => {
+          if (!(f.k in lc) || f.t || (f.show && !f.show(lm))) return;
+          const e = numError(f, lc[f.k], lm);
+          if (e) { errs[elKey(n, f.k)] = e; delete lc[f.k]; }
+        });
+        return { ...prev, ...lc };
+      });
+    }
 
     // Zmiany stopy.
     const overrides = {};
@@ -355,6 +435,21 @@ const UI = (() => {
       wrap.classList.toggle('invalid', !!errors[f.k]);
       if (f.placeholder) { const el = $('f-' + f.k); if (el) el.placeholder = f.placeholder(inputs); }
     });
+    inputs.extraLoans.forEach((l, n) => EXTRA_FIELDS.forEach((f) => {
+      const key = elKey(n, f.k);
+      const wrap = document.querySelector(`[data-field="${key}"]`);
+      if (!wrap) return;
+      wrap.hidden = f.show ? !f.show(l) : false;
+      const hint = wrap.querySelector('.hint');
+      if (hint) hint.textContent = f.hint ? f.hint(l) : '';
+      const err = wrap.querySelector('.error');
+      if (err) err.textContent = errors[key] || '';
+      wrap.classList.toggle('invalid', !!errors[key]);
+    }));
+    document.querySelectorAll('#extra-loans [data-el-card]').forEach((card, n) => {
+      const l = inputs.extraLoans[n];
+      if (l) card.querySelector('legend').textContent = l.name || 'Kredyt ' + (n + 2);
+    });
     const ovErr = $('overrides-error');
     if (ovErr) ovErr.textContent = errors.overrides || '';
     const yearErr = $('year-income-error');
@@ -388,6 +483,9 @@ const UI = (() => {
     const k = e.target.dataset.k;
     const f = FIELDS.find((x) => x.k === k);
     if (f && (!f.t || f.t === 'num') && !errors[k]) e.target.value = fieldValue(f);
+    const ek = e.target.dataset.ek, n = +e.target.dataset.el;
+    const g = EXTRA_FIELDS.find((x) => x.k === ek);
+    if (g && !g.t && !errors[elKey(n, ek)] && inputs.extraLoans[n]) e.target.value = fieldValue(g, inputs.extraLoans[n]);
     if (e.target.matches('[data-ov-month]')) { readForm(); rerenderOverrides(); updateFormState(); }
   }
 
@@ -407,6 +505,20 @@ const UI = (() => {
       e.target.closest('.override-row').remove();
       readForm();
       rerenderOverrides();
+      updateFormState();
+      recalc(true);
+    } else if (action === 'el-add' || action === 'el-remove') {
+      readForm();
+      const list = [...inputs.extraLoans];
+      if (action === 'el-add') {
+        list.push({ ...Storage.EXTRA_LOAN_DEFAULTS, name: 'Kredyt ' + (list.length + 2), margin: inputs.margin, paymentDay: inputs.paymentDay });
+      } else {
+        list.splice(+e.target.dataset.n, 1);
+        // Błędy pól dodatkowych kredytów są indeksowane — po usunięciu ich numeracja się przesuwa.
+        Object.keys(errors).filter((k) => /^el\d/.test(k)).forEach((k) => delete errors[k]);
+      }
+      inputs = { ...inputs, extraLoans: list };
+      rerenderExtraLoans();
       updateFormState();
       recalc(true);
     }
@@ -453,17 +565,18 @@ const UI = (() => {
     const i = inputs;
     const income = detailed(i) ? `${CROPS.find((c) => c[0] === i.cropName)?.[1] || i.cropName} ${num(i.yieldT, 1)} t/ha` : `${zl(i.netIncomePerHa)}/ha`;
     const name = currentId ? (Storage.getScenario(currentId)?.name || '') : '';
-    $('summary-bar').innerHTML = `<span>${name ? '<b>' + escapeHtml(name) + '</b> · ' : ''}${inputFmt(2).format(i.areaHa)} ha × ${zl(i.pricePerHa)} · ${yearsLabel(i.loanYears)} · ${pct(i.baseRate + i.margin, 2)} · ${escapeHtml(income)}</span><span class="edit">Zmień ›</span>`;
+    $('summary-bar').innerHTML = `<span>${name ? '<b>' + escapeHtml(name) + '</b> · ' : ''}${inputFmt(2).format(i.areaHa)} ha × ${zl(i.pricePerHa)} · ${yearsLabel(i.loanYears)} · ${pct(i.baseRate + i.margin, 2)}${i.extraLoans.length ? ' · + ' + i.extraLoans.length + ' ' + plural(i.extraLoans.length, 'kredyt', 'kredyty', 'kredytów') : ''} · ${escapeHtml(income)}</span><span class="edit">Zmień ›</span>`;
   }
 
   function verdictCause(s) {
     const cov = pct(s.minDscr * 100, 0);
     const tgt = pct(s.target * 100, 0);
+    const k = s.loans.length > 1 ? `wszystkich ${s.loans.length} kredytów` : 'kredytu';
     if (!fin(s.minDscr)) return 'Bez kredytu — nie ma rat do pokrycia.';
-    if (s.status === 'ok') return `Dochód z ziemi pokrywa raty z zapasem: w najgorszym roku ${cov} rocznej obsługi kredytu (wymagane ${tgt}).`;
-    if (s.status === 'warn') return `Dochód pokrywa raty, ale bez wymaganego zapasu: w najgorszym roku ${cov} obsługi kredytu, a bufor to ${tgt}.`;
+    if (s.status === 'ok') return `Dochód z ziemi pokrywa raty z zapasem: w najgorszym roku ${cov} rocznej obsługi ${k} (wymagane ${tgt}).`;
+    if (s.status === 'warn') return `Dochód pokrywa raty, ale bez wymaganego zapasu: w najgorszym roku ${cov} obsługi ${k}, a bufor to ${tgt}.`;
     const n = s.deficitYears.length;
-    return `Dochód ${zl(s.expectedIncome)}/rok nie wystarcza na raty: w najgorszym roku pokrywa ${cov} obsługi kredytu (${zl(s.maxDebtService)}/rok). ` +
+    return `Dochód ${zl(s.expectedIncome)}/rok nie wystarcza na raty: w najgorszym roku pokrywa ${cov} obsługi ${k} (${zl(s.maxDebtService)}/rok). ` +
       `Z reszty gospodarstwa trzeba dołożyć łącznie ${zl(s.shortfall)} w ${n} ${plural(n, 'roku', 'latach', 'latach')}.`;
   }
 
@@ -496,10 +609,13 @@ const UI = (() => {
     const crop = CROPS.find((c) => c[0] === inputs.cropName)?.[1] || '';
     const graceLine = inputs.graceMonths > 0
       ? `<br>w karencji: <b>${inputs.graceType === 'capitalize' ? '0 zł (odsetki doliczane)' : zl(s.firstPayment)}</b>` : '';
+    const extras = s.loans.length > 1;
+    const allLine = extras
+      ? `<br>wszystkie kredyty: ≈ <b>${zl(r.years[0].debtService / 12)}</b>/mies. w 1. roku, najwięcej ${zl(s.maxDebtService / 12)}/mies.` : '';
     const tiles = [
-      `<div class="tile"><div class="tile-label">Rata ${FREQ_NAME[f]}</div>` +
+      `<div class="tile"><div class="tile-label">Rata ${FREQ_NAME[f]}${extras ? ' (kredyt na ziemię)' : ''}</div>` +
       `<div class="tile-value">${zl(s.firstInstallment)}</div>` +
-      `<div class="tile-sub">${f > 1 ? `≈ <b>${zl(s.firstInstallmentMonthly)}</b> miesięcznie<br>` : ''}najwyższa ${zl(s.maxInstallment)} · przy ${pp(inputs.stressRatePp)}: <b>${zl(sr.maxInstallment)}</b>${graceLine}</div></div>`,
+      `<div class="tile-sub">${f > 1 ? `≈ <b>${zl(s.firstInstallmentMonthly)}</b> miesięcznie<br>` : ''}najwyższa ${zl(s.maxInstallment)} · przy ${pp(inputs.stressRatePp)}: <b>${zl(sr.maxInstallment)}</b>${graceLine}${allLine}</div></div>`,
 
       `<div class="tile"><div class="tile-label">Wymagany dochód</div>` +
       `<div class="tile-value">${zl(s.requiredIncome)}<span class="small muted"> /rok</span></div>` +
@@ -524,10 +640,12 @@ const UI = (() => {
       kv('Cena ziemi', zl(p.price)) + kv('Podatek PCC', zl(p.pcc)) +
       kv('Notariusz, wycena, inne', zl(p.oneOff - p.pcc)) + kv('Wkład własny', zl(p.own)) +
       kv('Prowizja' + (inputs.feeFinanced ? ' (w kredycie)' : ''), zl(p.fee)) + kv('Kwota kredytu', zl(p.loan)) +
-      kv('Gotówka potrzebna na start', zl(p.outlay), true) + '</div>' +
-      `<div class="card"><h3>Koszt kredytu</h3>` +
+      (r.inflow ? kv('Inne kredyty na zakup (po prowizji)', '−' + zl(r.inflow)) : '') +
+      kv('Gotówka potrzebna na start', zl(s.startCash), true) + '</div>' +
+      `<div class="card"><h3>Koszt kredytu${extras ? ' na ziemię' : ''}</h3>` +
       kv('Odsetki łącznie', zl(s.totalInterest)) + kv('Prowizja', zl(p.fee)) + kv('Ubezpieczenie i inne', zl(s.loanCostsTotal)) +
       kv('Całkowity koszt kredytu', zl(s.totalCost), true) + kv('Suma wszystkich rat', zl(s.totalPaid)) + kv('RRSO', s.rrso === null ? '—' : pct(s.rrso * 100, 2)) + '</div>' +
+      (extras ? loansCard(s) : '') +
       `<div class="card"><h3>Opłacalność ${afterYears(H)}</h3>` +
       kv('Wartość ziemi', zl(s.end.land)) + kv('Kredyt do spłaty', zl(s.end.balance)) +
       kv('Gotówka: wpływy − wydatki', signedZl(s.end.cumCash)) +
@@ -535,6 +653,17 @@ const UI = (() => {
       kv('Zysk vs lokata ' + pct(inputs.alternativeRate, 2), `<span class="${s.delta >= 0 ? 'pos' : 'neg'}">${signedZl(s.delta)}</span>`) +
       kv('NPV (dziś)', signedZl(s.npv)) + kv('IRR (roczna stopa zwrotu)', s.irr === null ? 'nie da się wyznaczyć' : pct(s.irr * 100, 2)) +
       `<p class="muted small">Wydzierżawienie tej ziemi dałoby ok. ${zl(s.rent)}/rok (${zl(inputs.rentPerHa)}/ha); zakładany dochód z uprawy to ${zl(s.expectedIncome)}/rok.</p></div>`;
+  }
+
+  const PURPOSE = { main: 'główny', own: 'na zakup', existing: 'istniejące' };
+  function loansCard(s) {
+    const rateOf = (l) => (l.fixed ? pct(l.rate, 2) + ' stałe' : pct(l.rate, 2));
+    const sum = (k) => s.loans.reduce((a, l) => a + l[k], 0);
+    return '<div class="card"><h3>Wszystkie kredyty</h3><div class="table-scroll"><table><thead><tr><th>Kredyt</th><th>Rodzaj</th><th>Kwota</th><th>Okres</th><th>Oproc.</th><th>Pierwsza rata</th><th>Odsetki</th><th>Koszt całk.</th><th>RRSO</th></tr></thead><tbody>' +
+      s.loans.map((l) => `<tr><td>${escapeHtml(l.name)}</td><td>${PURPOSE[l.purpose]}</td><td>${zl(l.amount)}</td><td>${formatMonths(l.months)}</td><td>${rateOf(l)}</td>` +
+        `<td>${zl(l.firstInstallment)}${l.freq > 1 ? ' <span class="small muted">' + FREQ_NAME[l.freq] + '</span>' : ''}</td><td>${zl(l.totalInterest)}</td><td>${zl(l.totalCost)}</td><td>${l.rrso === null ? '—' : pct(l.rrso * 100, 2)}</td></tr>`).join('') +
+      `</tbody><tfoot><tr><td>Razem</td><td></td><td>${zl(sum('amount'))}</td><td></td><td></td><td></td><td>${zl(sum('totalInterest'))}</td><td>${zl(s.allCost)}</td><td></td></tr></tfoot></table></div>` +
+      '<p class="muted small">Pokrycie, wymagany dochód i werdykt liczą raty wszystkich kredytów. Zysk, zwrot i bilans pomijają istniejące zobowiązania — istnieją niezależnie od zakupu.</p></div>';
   }
 
   const kv = (label, value, total) => `<div class="kv${total ? ' total' : ''}"><span>${label}</span><span>${value}</span></div>`;
@@ -741,8 +870,10 @@ const UI = (() => {
     $('sched-years').classList.toggle('active', scheduleMode === 'years');
     $('sched-months').classList.toggle('active', scheduleMode === 'months');
     const r = result.base;
+    const extras = r.loans.length > 1;
     if (scheduleMode === 'years') {
-      $('schedule-note').textContent = 'Rok liczony od miesiąca zakupu. Pokrycie = dochód / (raty + koszty kredytu).';
+      $('schedule-note').textContent = 'Rok liczony od miesiąca zakupu. Pokrycie = dochód / (raty + koszty kredytu).' +
+        (extras ? ' Raty, kapitał, odsetki, koszty i saldo: wszystkie kredyty razem; oprocentowanie: kredyt na ziemię.' : '');
       const ys = r.years;
       const sum = (k) => ys.reduce((s, y) => s + y[k], 0);
       const rate = (y) => (y.rateMin === y.rateMax ? pct(y.rateMin, 2) : pct(y.rateMin, 2) + '–' + pct(y.rateMax, 2));
@@ -753,15 +884,25 @@ const UI = (() => {
         `</tbody><tfoot><tr><td>Razem</td><td></td><td></td><td>${zl(sum('payments'))}</td><td>${zl(sum('capital'))}</td><td>${zl(sum('interest'))}</td><td>${zl(sum('loanCosts'))}</td><td></td><td>${zl(sum('income'))}</td><td></td></tr></tfoot></table>`;
       return;
     }
-    $('schedule-note').textContent = 'Wpisz inne oprocentowanie w racie, aby zmienić stopę od tego okresu do kolejnej zmiany. Zmiany widać też w parametrach (Kredyt → Zaawansowane).';
-    const pays = r.rows.filter((x) => x.isPayment);
+    if (scheduleLoan >= r.loans.length) scheduleLoan = 0;
+    const loan = r.loans[scheduleLoan];
+    $('schedule-note').textContent = loan.fixed
+      ? 'Ten kredyt ma stałe oprocentowanie.'
+      : 'Wpisz inne oprocentowanie w racie, aby zmienić stopę referencyjną od tego okresu do kolejnej zmiany — dla wszystkich kredytów o zmiennym oprocentowaniu. Zmiany widać też w parametrach (Kredyt → Zaawansowane).';
+    const picker = extras
+      ? `<label class="field-label" for="sched-loan">Kredyt</label><select id="sched-loan" class="text-input">${r.loans.map((l, n) => `<option value="${n}"${n === scheduleLoan ? ' selected' : ''}>${escapeHtml(l.name || 'Kredyt ' + (n + 1))}</option>`).join('')}</select>`
+      : '';
+    const pays = loan.rows.filter((x) => x.isPayment);
     const sum = (k) => pays.reduce((s, x) => s + x[k], 0);
-    $('schedule-table').innerHTML = '<table><thead><tr><th>Nr</th><th>Data</th><th>Oproc. %</th><th>Rata</th><th>Kapitał</th><th>Odsetki</th><th>Saldo</th></tr></thead><tbody>' +
+    $('schedule-table').innerHTML = picker + '<table><thead><tr><th>Nr</th><th>Data</th><th>Oproc. %</th><th>Rata</th><th>Kapitał</th><th>Odsetki</th><th>Saldo</th></tr></thead><tbody>' +
       pays.map((x, n) => {
-        const key = Calc.monthKey(r.start + x.m - r.freq);
+        const key = Calc.monthKey(r.start + x.m - loan.freq);
         const over = key in inputs.rateOverrides;
+        const rateCell = loan.fixed
+          ? pct(x.rate, 2)
+          : `<input class="rate-input${over ? ' overridden' : ''}" inputmode="decimal" data-key="${key}" data-margin="${loan.margin}" value="${inputFmt(2).format(x.rate)}" aria-label="Oprocentowanie raty ${n + 1}">`;
         return `<tr class="${x.inGrace ? 'grace' : ''}"><td>${n + 1}</td><td>${dateLabel(x.date)}${x.inGrace ? ' <span class="small">(karencja)</span>' : ''}</td>` +
-          `<td><input class="rate-input${over ? ' overridden' : ''}" inputmode="decimal" data-key="${key}" value="${inputFmt(2).format(x.rate)}" aria-label="Oprocentowanie raty ${n + 1}"></td>` +
+          `<td>${rateCell}</td>` +
           `<td>${zl2(x.payment)}</td><td>${zl2(x.capital)}</td><td>${zl2(x.interest)}</td><td>${zl2(x.balance)}</td></tr>`;
       }).join('') +
       `</tbody><tfoot><tr><td>Razem</td><td></td><td></td><td>${zl2(sum('payment'))}</td><td>${zl2(sum('capital'))}</td><td>${zl2(sum('interest'))}</td><td></td></tr></tfoot></table>`;
@@ -771,12 +912,13 @@ const UI = (() => {
 
   function handleScheduleChange(e) {
     const el = e.target;
+    if (el.id === 'sched-loan') { scheduleLoan = +el.value; renderSchedule(); return; }
     if (!el.matches('.rate-input')) return;
     const v = parsePlnNumber(el.value);
     const overrides = { ...inputs.rateOverrides };
     if (v === null) delete overrides[el.dataset.key];
     else if (Number.isNaN(v) || v < 0 || v > 40) { showToast('Oprocentowanie: liczba od 0 do 40%.'); renderSchedule(); return; }
-    else overrides[el.dataset.key] = Math.round((v - inputs.margin) * 10000) / 10000;
+    else overrides[el.dataset.key] = Math.round((v - +el.dataset.margin) * 10000) / 10000;
     inputs = { ...inputs, rateOverrides: overrides };
     rerenderOverrides();
     updateFormState();
@@ -860,6 +1002,7 @@ const UI = (() => {
       row('Okres', (d) => yearsLabel(d.i.loanYears)) +
       row('Raty', (d) => (d.i.installmentType === 'annuity' ? 'równe' : 'malejące') + ', ' + FREQ.find((x) => x[0] === d.i.frequency)[1]) +
       row('Oprocentowanie', (d) => pct(d.i.baseRate + d.i.margin, 2)) +
+      row('Inne kredyty', (d) => (d.i.extraLoans.length ? d.i.extraLoans.length + ' · ' + zl(d.i.extraLoans.reduce((s, l) => s + l.amount, 0)) : '—')) +
       row('Dochód netto', (d) => zl(d.s.expectedPerHa) + '/ha') +
       row('Werdykt', (d) => `${badge(d.s.status)} ${STATUS[d.s.status].label}`) +
       row('Pierwsza rata', (d) => zl(d.s.firstInstallment)) +

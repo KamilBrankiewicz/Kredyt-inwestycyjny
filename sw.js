@@ -1,5 +1,5 @@
 // Bump CACHE_NAME przy KAŻDEJ zmianie JS/CSS/HTML (razem ze znacznikiem „vN” w index.html).
-const CACHE_NAME = 'kredyt-inwestycyjny-v2';
+const CACHE_NAME = 'kredyt-inwestycyjny-v3';
 const CACHE_PREFIX = 'kredyt-inwestycyjny-';
 const APP_SHELL = [
   './',

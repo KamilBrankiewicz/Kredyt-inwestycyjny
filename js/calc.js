@@ -92,6 +92,78 @@ const Calc = (() => {
     return { price, own, pcc, oneOff, fee, loan, outlay };
   }
 
+  const freqOf = (f) => ([1, 3, 6, 12].includes(+f) ? +f : 1);
+
+  // Kredyt na ziemię i dodatkowe kredyty w jednym kształcie.
+  // purpose: 'main' | 'own' (współfinansuje zakup) | 'existing' (istniejące zobowiązanie, tylko raty).
+  function mainLoan(inp, p) {
+    const freq = freqOf(inp.frequency);
+    const N = clamp(Math.round(num(inp.loanYears, 1)), 1, 40) * 12;
+    return {
+      name: 'Kredyt na ziemię', purpose: 'main', amount: p.loan, net: p.price - p.own, fee: p.fee, N, freq,
+      grace: clamp(Math.round(num(inp.graceMonths)), 0, N - freq), graceType: inp.graceType,
+      installmentType: inp.installmentType, day: clamp(Math.round(num(inp.paymentDay, 10)), 1, 28),
+      fixed: false, margin: num(inp.margin), yearlyCosts: num(inp.yearlyLoanCosts),
+    };
+  }
+
+  function extraLoan(e) {
+    const freq = freqOf(e.frequency);
+    const N = Math.ceil(clamp(Math.round(num(e.months, 12)), 1, 480) / freq) * freq; // wielokrotność częstotliwości
+    const amount = Math.max(0, num(e.amount));
+    const fee = e.purpose === 'existing' ? 0 : amount * num(e.feePct) / 100;
+    return {
+      name: String(e.name || ''), purpose: e.purpose === 'existing' ? 'existing' : 'own', amount, net: amount - fee, fee, N, freq,
+      grace: clamp(Math.round(num(e.graceMonths)), 0, N - freq), graceType: e.graceType,
+      installmentType: e.installmentType, day: clamp(Math.round(num(e.paymentDay, 10)), 1, 28),
+      fixed: e.rateType === 'fixed', fixedRate: num(e.fixedRate), margin: num(e.margin), yearlyCosts: num(e.yearlyCosts),
+    };
+  }
+
+  // Harmonogram jednego kredytu na osi analizy m = 0…M. Zmienne oprocentowanie: wspólna ścieżka stopy
+  // referencyjnej (baseRate + lepkie zmiany) + marża kredytu + stres; stałe: fixedRate, bez stresu.
+  function schedule(L, start, M, baseRate, overrides, ratePp, rateFrom) {
+    let ovPtr = 0;
+    let base = baseRate;
+    let balance = L.amount;
+    let accrued = 0;
+    const rows = [{ m: 0, date: isoDate(start, L.day), rate: null, isPayment: false, inGrace: false, payment: 0, interest: 0, capital: 0, balance, accrued: 0, costs: 0 }];
+    for (let m = 1; m <= M; m++) {
+      const idx = start + m;
+      const periodStart = idx - 1; // stopa obowiązująca w okresie odsetkowym (m-1, m]
+      while (ovPtr < overrides.length && overrides[ovPtr][0] <= periodStart) base = overrides[ovPtr++][1];
+      const stress = ratePp !== 0 && (rateFrom === null || periodStart >= rateFrom) ? ratePp : 0;
+      const rate = L.fixed ? Math.max(0, L.fixedRate) : Math.max(0, base + L.margin + stress);
+      const days = (dayMs(idx, L.day) - dayMs(idx - 1, L.day)) / DAY_MS;
+
+      if (balance > 0) accrued += interest(balance, rate, days);
+
+      let payment = 0, paidInterest = 0, capital = 0;
+      const isPayment = m <= L.N && m % L.freq === 0 && (balance > 0 || accrued > 0);
+      const inGrace = isPayment && m <= L.grace;
+      if (isPayment) {
+        if (inGrace && L.graceType === 'capitalize') {
+          balance += accrued;
+        } else if (inGrace) {
+          paidInterest = accrued;
+        } else {
+          const remaining = (L.N - m) / L.freq + 1;
+          if (remaining <= 1) capital = balance;
+          else if (L.installmentType === 'decreasing') capital = balance / remaining;
+          else capital = clamp(pmt(balance, rate, remaining, 12 / L.freq) - accrued, 0, balance);
+          paidInterest = accrued;
+          balance -= capital;
+          if (balance < 1e-9) balance = 0;
+        }
+        payment = capital + paidInterest;
+        accrued = 0;
+      }
+      const costs = m <= L.N && L.amount > 0 ? L.yearlyCosts / 12 : 0;
+      rows.push({ m, date: isoDate(idx, L.day), rate, isPayment, inGrace, payment, interest: paidInterest, capital, balance, accrued, costs });
+    }
+    return rows;
+  }
+
   // ---- symulacja jednego scenariusza (pętla po miesiącach) ----
   // opt: { ratePp, rateFrom ('YYYY-MM' lub '' = od początku), incomeFactor }
   function simulate(inp, today, opt = {}) {
@@ -100,22 +172,23 @@ const Calc = (() => {
     const incomeFactor = opt.incomeFactor === undefined ? 1 : num(opt.incomeFactor, 1);
 
     const p = purchase(inp);
-    const freq = [1, 3, 6, 12].includes(+inp.frequency) ? +inp.frequency : 1;
-    const N = clamp(Math.round(num(inp.loanYears, 1)), 1, 40) * 12;
+    const main = mainLoan(inp, p);
+    const loans = [main, ...(Array.isArray(inp.extraLoans) ? inp.extraLoans : []).map(extraLoan)];
+    const { N, freq, day } = main;
+    const lastMonth = Math.max(...loans.map((l) => l.N));
     const horizonYears = Math.round(num(inp.horizonYears)) > 0 ? Math.round(num(inp.horizonYears)) : N / 12;
     const H = clamp(horizonYears, 1, 60) * 12;
-    const M = Math.max(N, H);
-    const grace = clamp(Math.round(num(inp.graceMonths)), 0, N - freq);
-    const day = clamp(Math.round(num(inp.paymentDay, 10)), 1, 28);
-    const margin = num(inp.margin);
+    const M = Math.ceil(Math.max(lastMonth, H) / 12) * 12;
     const start = startIndex(inp, today);
 
     const overrides = Object.entries(inp.rateOverrides || {})
       .map(([k, v]) => [monthIndex(k), +v])
       .filter(([k, v]) => k !== null && Number.isFinite(v))
       .sort((a, b) => a[0] - b[0]);
-    let ovPtr = 0;
-    let base = num(inp.baseRate);
+    loans.forEach((l) => { l.rows = schedule(l, start, M, num(inp.baseRate), overrides, l.fixed ? 0 : ratePp, rateFrom); });
+    const existing = loans.filter((l) => l.purpose === 'existing');
+    // Wypłata kredytów współfinansujących zakup wpływa do gotówki w miesiącu zakupu.
+    const inflow = loans.reduce((s, l) => s + (l.purpose === 'own' ? l.net : 0), 0);
 
     const annualIncome = incomePerHa(inp) * num(inp.areaHa) * incomeFactor;
     // Dochód z ha = część zmienna (przychód: plon × cena, w trybie „kwotą” cały dochód) + część stała.
@@ -126,49 +199,31 @@ const Calc = (() => {
     const incomeGrowth = num(inp.incomeGrowthPct) / 100;
     const landGrowth = num(inp.landGrowthPct) / 100;
     const incomeMonth = clamp(Math.round(num(inp.incomeMonth, 8)), 1, 12);
-    const yearlyCosts = num(inp.yearlyLoanCosts);
 
-    let balance = p.loan;
-    let accrued = 0;
-    let cumCash = -p.outlay;
+    // Sumy po kredytach w miesiącu m. Istniejące zobowiązania (ext*) wchodzą do obsługi długu i pokrycia,
+    // ale nie do gotówki i majątku — istnieją niezależnie od zakupu.
+    const sumAt = (list, k, m) => list.reduce((s, l) => s + l.rows[m][k], 0);
+    const debtAt = (m) => ({
+      payment: sumAt(loans, 'payment', m), interest: sumAt(loans, 'interest', m), capital: sumAt(loans, 'capital', m),
+      balance: sumAt(loans, 'balance', m), accrued: sumAt(loans, 'accrued', m), loanCosts: sumAt(loans, 'costs', m),
+      extOut: sumAt(existing, 'payment', m) + sumAt(existing, 'costs', m),
+      extDebt: sumAt(existing, 'balance', m) + sumAt(existing, 'accrued', m),
+    });
+
+    const d0 = debtAt(0);
+    let cumCash = -p.outlay + inflow;
+    const debt0 = d0.balance - d0.extDebt;
     const harvests = [];
     const rows = [{
       m: 0, date: isoDate(start, day), rate: null, isPayment: false, inGrace: false,
-      payment: 0, interest: 0, capital: 0, balance, accrued: 0, income: 0, loanCosts: 0,
-      cash: -p.outlay, cumCash, land: p.price, equity: p.price - balance + cumCash, equity0: p.price - balance + cumCash,
+      ...d0, income: 0, cash: cumCash, cumCash, debt: debt0,
+      land: p.price, equity: p.price - debt0 + cumCash, equity0: p.price - debt0 + cumCash,
     }];
 
     for (let m = 1; m <= M; m++) {
       const idx = start + m;
-      const periodStart = idx - 1; // stopa obowiązująca w okresie odsetkowym (m-1, m]
-      while (ovPtr < overrides.length && overrides[ovPtr][0] <= periodStart) base = overrides[ovPtr++][1];
-      const stress = ratePp !== 0 && (rateFrom === null || periodStart >= rateFrom) ? ratePp : 0;
-      const rate = Math.max(0, base + margin + stress);
-      const days = (dayMs(idx, day) - dayMs(idx - 1, day)) / DAY_MS;
-
-      if (balance > 0) accrued += interest(balance, rate, days);
-
-      let payment = 0, paidInterest = 0, capital = 0, loanCosts = 0;
-      const isPayment = m <= N && m % freq === 0 && (balance > 0 || accrued > 0);
-      const inGrace = isPayment && m <= grace;
-      if (isPayment) {
-        if (inGrace && inp.graceType === 'capitalize') {
-          balance += accrued;
-        } else if (inGrace) {
-          paidInterest = accrued;
-        } else {
-          const remaining = (N - m) / freq + 1;
-          if (remaining <= 1) capital = balance;
-          else if (inp.installmentType === 'decreasing') capital = balance / remaining;
-          else capital = clamp(pmt(balance, rate, remaining, 12 / freq) - accrued, 0, balance);
-          paidInterest = accrued;
-          balance -= capital;
-          if (balance < 1e-9) balance = 0;
-        }
-        payment = capital + paidInterest;
-        accrued = 0;
-      }
-      if (m <= N && p.loan > 0) loanCosts = yearlyCosts / 12;
+      const mr = main.rows[m];
+      const d = debtAt(m);
 
       let income = 0;
       if ((idx % 12) + 1 === incomeMonth) {
@@ -179,15 +234,15 @@ const Calc = (() => {
         harvests.push({ m, year, yearFactor, scale, income });
       }
 
-      const cash = income - payment - loanCosts;
+      const cash = income - d.payment - d.loanCosts + d.extOut;
       cumCash += cash;
       const land = p.price * Math.pow(1 + landGrowth, m / 12);
+      const debt = d.balance + d.accrued - d.extDebt; // dług związany z zakupem (bez istniejących zobowiązań)
       rows.push({
-        m, date: isoDate(idx, day), rate, isPayment, inGrace,
-        payment, interest: paidInterest, capital, balance, accrued, income, loanCosts,
-        cash, cumCash, land,
-        equity: land - balance - accrued + cumCash,
-        equity0: p.price - balance - accrued + cumCash,
+        m, date: isoDate(idx, day), rate: mr.rate, isPayment: mr.isPayment, inGrace: mr.inGrace,
+        ...d, income, cash, cumCash, land, debt,
+        equity: land - debt + cumCash,
+        equity0: p.price - debt + cumCash,
       });
     }
 
@@ -206,28 +261,43 @@ const Calc = (() => {
         balance: slice[slice.length - 1].balance,
         rateMin: Math.min(...rates), rateMax: Math.max(...rates),
         dscr: debtService > 0 ? income / debtService : Infinity,
-        inLoan: y <= N / 12,
+        inLoan: y <= Math.ceil(lastMonth / 12),
       });
     }
 
-    return { rows, years, harvests, revPerHa, purchase: p, N, H, M, freq, start, day, annualIncome };
+    return { rows, years, harvests, revPerHa, purchase: p, loans, inflow, N, H, M, freq, start, day, annualIncome };
+  }
+
+  // Statystyki jednego kredytu. Odsetki = suma wpłat − kwota (więc z odsetkami skapitalizowanymi).
+  function loanStats(l) {
+    const lr = l.rows.slice(1, l.N + 1);
+    const pays = lr.filter((r) => r.isPayment);
+    const amort = pays.filter((r) => !r.inGrace);
+    const totalPaid = pays.reduce((s, r) => s + r.payment, 0);
+    const totalInterest = totalPaid - l.amount;
+    const costs = lr.reduce((s, r) => s + r.costs, 0);
+    const flows = lr.map((r) => -(r.payment + r.costs));
+    flows.unshift(l.net);
+    return {
+      name: l.name, purpose: l.purpose, amount: l.amount, months: l.N, freq: l.freq, fixed: l.fixed,
+      rate: l.rows.length > 1 ? l.rows[1].rate : null,
+      firstPayment: pays.length ? pays[0].payment : 0,
+      firstInstallment: amort.length ? amort[0].payment : 0,
+      maxInstallment: pays.reduce((mx, r) => Math.max(mx, r.payment), 0),
+      totalPaid, totalInterest, loanCostsTotal: costs, fee: l.fee,
+      totalCost: totalInterest + l.fee + costs,
+      rrso: l.amount > 0 ? annualize(irr(flows)) : null,
+    };
   }
 
   // ---- podsumowanie scenariusza ----
   function summarize(sim, inp) {
-    const { rows, years, purchase: p, N, H, freq } = sim;
+    const { rows, years, H, freq } = sim;
     const target = num(inp.dscrTarget, 1.2) > 0 ? num(inp.dscrTarget, 1.2) : 1.2;
-    const loanRows = rows.slice(1, N + 1);
-    const pays = loanRows.filter((r) => r.isPayment);
-    const amort = pays.filter((r) => !r.inGrace);
     const loanYears = years.filter((y) => y.inLoan);
-
-    const firstPayment = pays.length ? pays[0].payment : 0;
-    const firstInstallment = amort.length ? amort[0].payment : 0;
-    const maxInstallment = pays.reduce((mx, r) => Math.max(mx, r.payment), 0);
-    const totalPaid = pays.reduce((s, r) => s + r.payment, 0);
-    const totalInterest = totalPaid - p.loan; // obejmuje też odsetki skapitalizowane w karencji
-    const loanCostsTotal = loanRows.reduce((s, r) => s + r.loanCosts, 0);
+    const loans = sim.loans.map(loanStats);
+    const main = loans[0];
+    const { firstPayment, firstInstallment, maxInstallment, totalPaid, totalInterest, loanCostsTotal, rrso } = main;
 
     // Pokrycie obsługi długu (rocznie).
     let worst = null;
@@ -253,14 +323,14 @@ const Calc = (() => {
 
     // Bilans na koniec horyzontu: ziemia − dług + skumulowana gotówka (bez oprocentowania gotówki).
     const end = rows[H];
-    const netGain = end.land - end.balance - end.accrued + end.cumCash;
+    const netGain = end.land - end.debt + end.cumCash;
 
     // NPV / IRR kapitału własnego (przepływy miesięczne, na końcu horyzontu ziemia minus dług).
     // Stopa dyskontowa = stopa alternatywna po Belce.
     const altNet = num(inp.alternativeRate) / 100 * (1 - BELKA);
     const rMonthly = Math.pow(1 + altNet, 1 / 12) - 1;
     const flows = horizonRows.map((r) => r.cash);
-    flows[H] += end.land - end.balance - end.accrued;
+    flows[H] += end.land - end.debt;
     const npvValue = npv(rMonthly, flows);
     const irrValue = annualize(irr(flows));
 
@@ -268,22 +338,20 @@ const Calc = (() => {
     // na stopie alternatywnej, a nadwyżki też tam trafiają. Różnica majątku po H = NPV przeniesione na koniec.
     const delta = npvValue * Math.pow(1 + rMonthly, H);
 
-    // RRSO: wypłata netto (kwota bez prowizji) i wszystkie wpłaty na kredyt.
-    const loanFlows = loanRows.map((r) => -(r.payment + r.loanCosts));
-    loanFlows.unshift(p.price - p.own);
-    const rrso = p.loan > 0 ? annualize(irr(loanFlows)) : null;
+    const allCost = loans.reduce((s, l) => s + l.totalCost, 0);
 
     return {
+      loans, allCost, startCash: -rows[0].cash,
       target, status, minDscr, worstYear: worst ? worst.year : null,
       firstPayment, firstInstallment, maxInstallment, freq,
       firstInstallmentMonthly: firstInstallment / freq, maxInstallmentMonthly: maxInstallment / freq,
       totalInterest, totalPaid, loanCostsTotal,
-      totalCost: totalInterest + p.fee + loanCostsTotal,
+      totalCost: main.totalCost,
       maxDebtService, requiredIncome, requiredPerHa, requiredMonthly: requiredIncome / 12, thresholdYield,
       expectedIncome: sim.annualIncome, expectedPerHa: incomePerHa(inp),
       deficitYears: deficitYears.map((y) => y.year), shortfall,
       paybackCash, paybackWealth, paybackWealth0,
-      horizonMonths: H, end: { land: end.land, balance: end.balance + end.accrued, cumCash: end.cumCash },
+      horizonMonths: H, end: { land: end.land, balance: end.debt, cumCash: end.cumCash },
       netGain, delta, npv: npvValue, irr: irrValue, altNetRate: altNet, rrso,
       rent: num(inp.rentPerHa) * area,
     };
@@ -308,8 +376,10 @@ const Calc = (() => {
     // Równoległe przesunięcie stopy od początku kredytu, od stopy 0% do +30 pp.
     const fRate = (s) => crit({ ratePp: s });
     // Dolna granica: oprocentowanie 0% we wszystkich miesiącach, także tych ze zmianami stopy.
+    // Przesunięcie dotyczy kredytów o zmiennym oprocentowaniu.
     const maxBase = Math.max(num(inp.baseRate), ...Object.values(inp.rateOverrides || {}).map((v) => num(v)));
-    const loShift = -(maxBase + num(inp.margin));
+    const margins = [num(inp.margin), ...(inp.extraLoans || []).filter((l) => l.rateType !== 'fixed').map((l) => num(l.margin))];
+    const loShift = -(maxBase + Math.max(...margins));
     const rateShift = result(solve(fRate, loShift, 30, 1e-3), fRate(30) >= 0);
 
     const area = num(inp.areaHa);
@@ -457,6 +527,7 @@ const Calc = (() => {
     const p = base.purchase;
     if (p.loan <= 0) warnings.push('Wkład własny pokrywa całą cenę — kredyt nie jest potrzebny.');
     if (num(inputs.graceMonths) >= base.N) warnings.push('Karencja nie może trwać przez cały okres kredytu — skrócono ją.');
+    if (base.inflow > p.outlay + 0.5) warnings.push('Dodatkowe kredyty na zakup przekraczają gotówkę potrzebną na start — nadwyżka liczy się jako gotówka.');
     return {
       base, stressRate, stressIncome,
       thresholds: thresholds(inputs, today, base.summary.target),

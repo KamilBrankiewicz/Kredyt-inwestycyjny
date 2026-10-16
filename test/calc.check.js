@@ -1,7 +1,7 @@
 // node test/calc.check.js — jedyny automatyczny check: asserty silnika (bez npm).
 const assert = require('node:assert/strict');
 const Calc = require('../js/calc.js');
-const { DEFAULTS, withDefaults, validateImport } = require('../js/storage.js');
+const { DEFAULTS, EXTRA_LOAN_DEFAULTS, withDefaults, validateImport } = require('../js/storage.js');
 
 const TODAY = '2026-10-13';
 const near = (actual, expected, tol, msg) =>
@@ -171,6 +171,84 @@ check('Monte Carlo: mała zmienność → mediana ≈ wynik bazowy', () => {
   const r = Calc.calculate(inputs({ incomeVolatilityPct: 0.01 }), TODAY);
   near(r.mc.delta.p50, r.base.summary.delta, 50, 'zysk vs lokata');
   near(r.mc.years[0].income.p50, r.base.years[0].income, 10, 'dochód roku 1');
+});
+
+// ---- wiele kredytów ----
+const extra = (patch) => ({ ...EXTRA_LOAN_DEFAULTS, ...patch });
+
+check('podział kredytu na dwa o tych samych warunkach = jeden kredyt (obsługa, pokrycie, zysk)', () => {
+  const one = Calc.calculate(inputs({ feePct: 0 }), TODAY).base;
+  const split = Calc.calculate(inputs({
+    feePct: 0, ownContribution: DEFAULTS.ownContribution + 200000,
+    extraLoans: [extra({ amount: 200000, months: DEFAULTS.loanYears * 12, margin: DEFAULTS.margin, paymentDay: DEFAULTS.paymentDay })],
+  }), TODAY).base;
+  one.years.forEach((y, i) => near(split.years[i].debtService, y.debtService, 1e-6, 'obsługa w roku ' + y.year));
+  near(split.summary.minDscr, one.summary.minDscr, 1e-9, 'min. pokrycie');
+  near(split.summary.delta, one.summary.delta, 1e-6, 'zysk vs lokata');
+  near(split.summary.startCash, one.summary.startCash, 1e-6, 'gotówka na start');
+  near(split.summary.loans[0].totalInterest + split.summary.loans[1].totalInterest, one.summary.totalInterest, 1e-6, 'odsetki razem');
+});
+
+check('dodatkowy kredyt: własny harmonogram spłaca kwotę, saldo końcowe 0, raty co częstotliwość', () => {
+  const sim = Calc.simulate(inputs({ extraLoans: [extra({ amount: 150000, months: 60, frequency: 3, installmentType: 'decreasing', graceMonths: 6 })] }), TODAY);
+  const l = sim.loans[1];
+  near(l.rows.reduce((s, r) => s + r.capital, 0), 150000, 0.01, 'suma kapitału');
+  assert.equal(l.rows[60].balance, 0, 'saldo po 60 mies.');
+  assert.equal(l.rows.filter((r) => r.isPayment).length, 20, 'liczba rat');
+  assert.equal(l.rows.slice(61).some((r) => r.payment || r.costs), false, 'po okresie nic');
+});
+
+check('kredyt współfinansujący zakup: wypłata minus prowizja wpływa do gotówki na start', () => {
+  const base = Calc.simulate(inputs({}), TODAY);
+  const sim = Calc.simulate(inputs({ extraLoans: [extra({ amount: 100000, feePct: 2 })] }), TODAY);
+  near(sim.rows[0].cash, base.rows[0].cash + 98000, 1e-6, 'gotówka m = 0');
+  near(sim.rows[0].equity, base.rows[0].equity - 2000, 1e-6, 'majątek m = 0: tylko prowizja');
+});
+
+check('istniejące zobowiązanie: obniża pokrycie, nie zmienia gotówki, majątku ani zysku vs lokata', () => {
+  const base = Calc.calculate(inputs({}), TODAY).base;
+  const r = Calc.calculate(inputs({ extraLoans: [extra({ purpose: 'existing', amount: 80000, months: 48 })] }), TODAY).base;
+  assert.ok(r.summary.minDscr < base.summary.minDscr - 0.01, 'pokrycie niższe');
+  assert.ok(r.years[0].debtService > base.years[0].debtService, 'obsługa wyższa');
+  near(r.summary.end.cumCash, base.summary.end.cumCash, 1e-6, 'gotówka');
+  near(r.summary.delta, base.summary.delta, 1e-6, 'zysk vs lokata');
+  near(r.summary.end.balance, base.summary.end.balance, 1e-6, 'dług na końcu');
+});
+
+check('zobowiązanie dłuższe niż kredyt na ziemię: lata analizy i pokrycie obejmują jego okres', () => {
+  const r = Calc.calculate(inputs({ loanYears: 10, extraLoans: [extra({ purpose: 'existing', months: 150 })] }), TODAY).base;
+  assert.equal(r.years.length, 13);
+  assert.equal(r.years.filter((y) => y.inLoan).length, 13);
+  assert.ok(r.years[11].debtService > 0, 'rok 12 z obsługą');
+});
+
+check('stałe oprocentowanie: stres stopy nie zmienia rat tego kredytu', () => {
+  const r = Calc.calculate(inputs({ extraLoans: [extra({ rateType: 'fixed', fixedRate: 2 })] }), TODAY);
+  r.base.loans[1].rows.forEach((x, i) => near(r.stressRate.loans[1].rows[i].payment, x.payment, 1e-9, 'rata'));
+  near(r.base.loans[1].rows[5].rate, 2, 1e-12, 'oprocentowanie stałe');
+  assert.ok(r.stressRate.loans[0].rows[30].payment > r.base.loans[0].rows[30].payment, 'kredyt na ziemię w stresie wyższy');
+});
+
+check('zmienne oprocentowanie dodatkowego kredytu idzie za zmianami stopy referencyjnej', () => {
+  const sim = Calc.simulate(inputs({ rateOverrides: { '2028-03': 6 }, extraLoans: [extra({ margin: 1 })] }), TODAY);
+  const rateIn = (key) => sim.loans[1].rows.find((r) => r.date.startsWith(key)).rate;
+  near(rateIn('2028-03'), DEFAULTS.baseRate + 1, 1e-9, 'przed zmianą');
+  near(rateIn('2028-04'), 6 + 1, 1e-9, 'po zmianie');
+});
+
+check('próg stopy z dwoma kredytami: na progu min. pokrycie = bufor', () => {
+  const inp = inputs({ yieldT: 12, extraLoans: [extra({ amount: 50000, margin: 4 })] });
+  const t = Calc.calculate(inp, TODAY).thresholds;
+  assert.ok(t.rateShift.value !== null);
+  near(Calc.summarize(Calc.simulate(inp, TODAY, { ratePp: t.rateShift.value }), inp).minDscr, inp.dscrTarget, 1e-4, 'pokrycie na progu');
+});
+
+check('import: extraLoans musi być tablicą obiektów o dobrych typach', () => {
+  const sc = (extraLoans) => ({ version: 1, scenarios: [{ id: 'a', updatedAt: '2026-10-16', name: 'x', inputs: { extraLoans } }] });
+  assert.ok(validateImport(sc({})));
+  assert.ok(validateImport(sc([{ amount: '5' }])));
+  assert.equal(validateImport(sc([{ amount: 5 }])), null);
+  assert.equal(withDefaults({ extraLoans: [{ amount: 5 }] }).extraLoans[0].months, EXTRA_LOAN_DEFAULTS.months);
 });
 
 check('domyślne parametry: wszystkie liczby skończone', () => {

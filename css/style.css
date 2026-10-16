@@ -254,6 +254,9 @@ details.adv > summary { cursor: pointer; padding: 10px 0; color: var(--text-mute
 details.adv[open] > summary { margin-bottom: 4px; }
 .override-row { display: grid; grid-template-columns: 1fr 90px 34px; gap: 6px; margin-bottom: 6px; }
 .override-row input { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 7px 8px; min-width: 0; }
+fieldset.extra-loan { border: 1px solid var(--border); border-radius: var(--radius-small); padding: 4px 12px 12px; margin: 0 0 10px; min-width: 0; }
+fieldset.extra-loan > legend { padding: 0 6px; font-weight: 600; }
+#sched-loan { margin-bottom: 10px; }
 
 .text-input {
   width: 100%; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-small);

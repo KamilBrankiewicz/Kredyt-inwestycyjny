@@ -45,7 +45,7 @@ index.html → app.js → ui.js → calc.js          (liczy; zero DOM, zero Stor
 | `kredyt.theme` | `auto` / `dark` / `light` | nie |
 
 `Scenario = { id, name, notes, inputs, createdAt, updatedAt }`. `inputs` zawsze czytane przez
-`withDefaults` (`{ ...DEFAULTS, ...saved }`). Eksport `{ version: 1, scenarios }`; import: `JSON.parse`
+`withDefaults` (`{ ...DEFAULTS, ...saved }`; każdy element `inputs.extraLoans` uzupełniany z `EXTRA_LOAN_DEFAULTS`). Eksport `{ version: 1, scenarios }`; import: `JSON.parse`
 → `migrate` → `validateImport` (typy pól zgodne z `DEFAULTS`) → `mergeListBy` (scal).
 
 ## Wspólny origin z Licznikiem Kalorii

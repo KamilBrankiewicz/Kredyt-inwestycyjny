@@ -105,6 +105,7 @@
         <p><b>Raty malejące:</b> kapitał stały <code>S / n</code>, do tego odsetki.</p>
         <p><b>Karencja:</b> albo płacisz same odsetki, albo odsetki są doliczane do salda. Potem spłata kapitału na pozostałe raty. Ostatnia rata domyka saldo do zera.</p>
         <p><b>Zmiany stopy</b> obowiązują od wskazanego miesiąca do następnej zmiany. Stres testu dodaje punkty procentowe od wybranego miesiąca.</p>
+        <p><b>Inne kredyty i zobowiązania</b> mają własny harmonogram liczony tak samo, startują razem z kredytem na ziemię. Zmienne oprocentowanie = ta sama stopa referencyjna (z jej zmianami i stresem) + własna marża; stałe nie zmienia się w stresie. Raty wszystkich kredytów sumują się w obsłudze długu, pokryciu, wymaganym dochodzie i werdykcie. Kredyt <i>na zakup</i>: wypłata (po prowizji) zmniejsza gotówkę potrzebną na start, a jego saldo i raty wchodzą też do zysku i zwrotu. <i>Istniejące zobowiązanie</i>: tylko do pokrycia — zysk, zwrot i bilans zakupu liczymy bez niego.</p>
         <h3>Dochód i wymagany dochód</h3>
         <p>Dochód netto z ha = plon × cena − koszty bezpośrednie + dopłaty − podatek rolny. Cały roczny dochód wpływa w miesiącu żniw.</p>
         <p>Rok analizy liczymy od miesiąca zakupu. <b>Obsługa kredytu w roku</b> = suma rat + roczne koszty kredytu. <b>Pokrycie</b> = dochód w roku / obsługa kredytu w roku. <b>Wymagany dochód</b> = najwyższa roczna obsługa kredytu × bufor bezpieczeństwa. <b>Plon progowy</b> = (wymagany dochód na ha + koszty − dopłaty + podatek rolny) / cena.</p>
@@ -132,7 +133,7 @@
   <!-- Ustawienia -->
   <div id="modal-settings" class="modal-overlay">
     <div class="modal" role="dialog" aria-labelledby="settings-title">
-      <h2 id="settings-title">Ustawienia <span class="version">v2</span></h2>
+      <h2 id="settings-title">Ustawienia <span class="version">v3</span></h2>
       <label class="field-label" for="theme-select">Motyw</label>
       <select id="theme-select" class="text-input">
         <option value="auto">Systemowy</option>

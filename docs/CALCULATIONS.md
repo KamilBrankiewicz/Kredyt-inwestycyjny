@@ -20,6 +20,26 @@ Kod: [`js/calc.js`](../js/calc.js), sprawdzenie: `node test/calc.check.js`.
 | Podatek | brak podatku dochodowego; podatek rolny to koszt w dochodzie z ha. Belka (19%) tylko w stopie alternatywnej |
 | Horyzont | wspólny dla wszystkich wskaźników; domyślnie = okres kredytu. Na końcu horyzontu odejmujemy saldo kredytu do spłaty |
 
+## Wiele kredytów (`extraLoans`)
+
+Kredyt na ziemię + dowolna liczba dodatkowych kredytów. Każdy ma własny harmonogram liczony tą samą funkcją
+(`schedule`) i według konwencji powyżej: kwota, okres w miesiącach (zaokrąglany w górę do wielokrotności częstotliwości),
+częstotliwość, rodzaj rat, karencja, dzień płatności, koszty roczne. Wszystkie startują w miesiącu zakupu (`m = 0`).
+
+| Pole | Reguła |
+|---|---|
+| Oprocentowanie zmienne | wspólna ścieżka stopy referencyjnej (`baseRate` + `rateOverrides`) + marża tego kredytu + stres; przesuwa je też próg stopy i siatka |
+| Oprocentowanie stałe | `fixedRate`; stres, próg stopy i siatka go nie zmieniają |
+| `purpose: 'own'` (na zakup) | wypłata `kwota − prowizja` wpływa do gotówki w `m = 0`; raty, saldo i koszty wchodzą do wszystkich wyników |
+| `purpose: 'existing'` (istniejące) | kwota = saldo do spłaty; raty i koszty wchodzą tylko do **obsługi długu** (pokrycie, werdykt, wymagany dochód, brakuje na raty, symulacja). Gotówka, majątek, bilans, NPV, zysk vs lokata i zwrot — bez niego, bo istnieje niezależnie od zakupu |
+
+- Obsługa długu w roku = raty + koszty **wszystkich** kredytów. Lata z obsługą (`inLoan`) trwają do końca najdłuższego kredytu;
+  oś analizy `M` = max(najdłuższy kredyt, horyzont), zaokrąglone w górę do pełnego roku.
+- Przepływ w miesiącu = dochód − raty i koszty kredytów *na ziemię i na zakup*. Dług w majątku = saldo + odsetki narosłe tych kredytów.
+- Statystyki osobno dla każdego kredytu (`loanStats`): pierwsza rata, odsetki, koszt całkowity, RRSO (wypłata netto, potem raty i koszty).
+  Pola `firstInstallment`, `totalCost`, `rrso` itd. w podsumowaniu dotyczą kredytu na ziemię; `loans` i `allCost` — wszystkich.
+- Bez dodatkowych kredytów wynik jest identyczny jak w v2.
+
 ## Oś czasu
 
 - `m = 0` — miesiąc zakupu i uruchomienia kredytu (`startMonth`). Wypływ gotówki: wkład + koszty zakupu (+ prowizja, jeśli nie jest kredytowana).
@@ -110,6 +130,8 @@ Siatka: min. pokrycie dla przesunięć stopy −1…+4 pp × zmian dochodu −30
 - Jedna efektywna stopa alternatywna z Belką naliczaną rocznie.
 - Prowizja liczona od kwoty kredytu bez prowizji.
 - Brak dopłat do oprocentowania (ARiMR), nadpłat, transz, kredytów walutowych, podatku dochodowego.
+- Dodatkowe kredyty startują razem z zakupem; zmienne oprocentowanie idzie za jedną wspólną stopą referencyjną.
+- RRSO kredytu na ziemię przyjmuje wypłatę `cena − wkład`, więc prowizja płacona gotówką (niekredytowana) do niego nie wchodzi.
 
 ## Mapa funkcji `calc.js`
 
@@ -119,7 +141,10 @@ Siatka: min. pokrycie dla przesunięć stopy −1…+4 pp × zmian dochodu −30
 | `monthIndex`, `monthKey` | miesiąc ↔ indeks `rok × 12 + (miesiąc − 1)` |
 | `purchase` | cena, PCC, koszty zakupu, prowizja, kwota kredytu, gotówka na start |
 | `incomePerHa` | dochód netto z ha |
-| `simulate` | pętla miesięczna → `rows`, `years` |
+| `mainLoan`, `extraLoan` | parametry kredytu na ziemię / dodatkowego w jednym kształcie |
+| `schedule` | harmonogram jednego kredytu na osi `m = 0 … M` |
+| `simulate` | harmonogramy wszystkich kredytów + pętla miesięczna → `rows` (sumy), `years`, `loans` |
+| `loanStats` | statystyki jednego kredytu |
 | `summarize` | wskaźniki scenariusza |
 | `thresholds`, `grid` | progi i siatka wrażliwości |
 | `monteCarlo` | symulacja zmiennych lat |
